@@ -9,7 +9,7 @@ import validators
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components import persistent_notification
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.components.media_player import MediaPlayerEntity, MediaPlayerEntityFeature
+from homeassistant.components.media_player import MediaPlayerEntity, MediaPlayerEntityFeature, MediaPlayerState
 from pyamplipi.models import ZoneUpdate, SourceUpdate, MultiZoneUpdate
 
 from ..utils import get_fixed_source_id, has_fixed_source, extract_amplipi_id_from_unique_id
@@ -34,6 +34,11 @@ DEFAULT_SUPPORTED_COMMANDS = ( # Used to forcibly support a shortlist of command
     MediaPlayerEntityFeature.TURN_OFF
     | MediaPlayerEntityFeature.TURN_ON
 )
+
+PLAYBACK_STATES = {
+    'playing': MediaPlayerState.PLAYING,
+    'paused': MediaPlayerState.PAUSED,
+}
 
 SUPPORT_LOOKUP_DICT = {
     'play': MediaPlayerEntityFeature.PLAY,
@@ -110,7 +115,7 @@ class AmpliPiMediaPlayer(CoordinatorEntity[AmpliPiDataClient], MediaPlayerEntity
     
     async def async_connect_stream_to_source(self, stream: Stream, source: Optional[Source] = None, leaving: Optional[List[int]] = None):
         """Connects the stream to a source. If a source is not provided, picks one with routing.pick_bus, which respects buses reserved for RCA inputs."""
-        _LOGGER.info(f"Stream {stream.name} attempting to connect to source {source}")
+        _LOGGER.debug(f"Stream {stream.name} attempting to connect to source {source}")
         source_id = None
         if has_fixed_source(stream):
             # RCAs are hardware constrained to only being able to use one specific source
@@ -227,6 +232,10 @@ class AmpliPiMediaPlayer(CoordinatorEntity[AmpliPiDataClient], MediaPlayerEntity
 
         return None
     
+    def playback_state(self) -> MediaPlayerState:
+        """The state of whatever is playing on the connected source. Anything but playing or paused counts as idle"""
+        return PLAYBACK_STATES.get(self._source.info.state, MediaPlayerState.IDLE)
+
     def get_song_info(self, source):
         """Get info relating to current song from the connected source"""
         if source is not None:

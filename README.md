@@ -3,7 +3,7 @@
 This component adds support for auto-discovery and configuration of
 AmpliPi Groups and Zones.
 
-If you like this component, please give it a star on [github](https://github.com/brianhealey/hacs_amplipi).
+If you like this component, please give it a star on [github](https://github.com/micro-nova/hacs_amplipi).
 
 ## Installation
 

@@ -10,7 +10,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 
 from pyamplipi.amplipi import AmpliPi
-from pyamplipi.models import SourceUpdate, ZoneUpdate, MultiZoneUpdate, GroupUpdate, PlayMedia, Announcement, Status as PyStatus, Source as PySource, Stream as PyStream, Group as PyGroup, Zone as PyZone, Status as PyStatus
+from pyamplipi.models import SourceUpdate, ZoneUpdate, MultiZoneUpdate, GroupUpdate, PlayMedia, Announcement, Source as PySource, Stream as PyStream, Group as PyGroup, Zone as PyZone
 
 from .models import Status, Source, Zone, Group, Stream
 from .const import (

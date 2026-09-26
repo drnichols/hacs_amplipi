@@ -3,7 +3,7 @@
 import logging
 from typing import List, Optional
 
-from homeassistant.const import STATE_PLAYING, STATE_PAUSED, STATE_IDLE, STATE_UNKNOWN, STATE_OFF
+from homeassistant.components.media_player import MediaPlayerState, MediaType
 from pyamplipi.models import ZoneUpdate, SourceUpdate, MultiZoneUpdate
 
 from .base import AmpliPiMediaPlayer
@@ -84,7 +84,7 @@ class AmpliPiStream(AmpliPiMediaPlayer):
     async def async_turn_off(self):
         try:
             if self._source is not None:
-                _LOGGER.info(f"Disconnecting stream from source {self._source.name}")
+                _LOGGER.debug(f"Disconnecting stream from source {self._source.name}")
                 await self._update_zones(
                     ZoneUpdate(
                         source_id=-1,
@@ -111,7 +111,7 @@ class AmpliPiStream(AmpliPiMediaPlayer):
             return
 
         if self._source is not None:
-            _LOGGER.info(f"setting mute to {mute}")
+            _LOGGER.debug(f"setting mute to {mute}")
             await self._update_zones(
                 ZoneUpdate(
                     mute=mute,
@@ -132,7 +132,7 @@ class AmpliPiStream(AmpliPiMediaPlayer):
     @property
     def media_content_type(self):
         """Content type of current playing media."""
-        return "speaker"
+        return MediaType.MUSIC
 
     def sync_state(self):
         """Retrieve latest state."""
@@ -173,24 +173,12 @@ class AmpliPiStream(AmpliPiMediaPlayer):
     def state(self):
         """Media player state of the stream."""
         if self._is_off and self._source is None:
-            return STATE_OFF
+            return MediaPlayerState.OFF
         elif self._last_update_successful is False:
-            return STATE_UNKNOWN
+            return None
         elif self._source is None or self._source.id == -1 or self._source.info is None or self._source.info.state is None:
-            return STATE_IDLE
-        elif self._source.info.state in (
-                'paused'
-        ):
-            return STATE_PAUSED
-        elif self._source.info.state in (
-                'playing'
-        ):
-            return STATE_PLAYING
-        elif self._source.info.state in (
-                'stopped'
-        ):
-            return STATE_IDLE
-        return STATE_IDLE
+            return MediaPlayerState.IDLE
+        return self.playback_state()
 
 
     @property

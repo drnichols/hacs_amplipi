@@ -4,11 +4,10 @@ import logging
 from typing import Optional
 
 from homeassistant.components import media_source
-from homeassistant.components.media_player import MediaPlayerEntity, MediaPlayerEntityFeature, MediaType
+from homeassistant.components.media_player import MediaPlayerEntity, MediaPlayerEntityFeature, MediaPlayerState, MediaType
 from homeassistant.components.media_player.browse_media import (
     async_process_play_media_url,
 )
-from homeassistant.const import STATE_IDLE
 from pyamplipi.models import Announcement
 
 from ..coordinator import AmpliPiDataClient
@@ -78,7 +77,7 @@ class AmpliPiAnnouncer(MediaPlayerEntity):
 
     @property
     def state(self):
-        return STATE_IDLE
+        return MediaPlayerState.IDLE
     
     def deselect(self):
         """Deselect all zones and groups"""
@@ -98,7 +97,7 @@ class AmpliPiAnnouncer(MediaPlayerEntity):
         if media_source.is_media_source_id(media_id):
             play_item = await media_source.async_resolve_media(self.hass, media_id, target_media_player=self.entity_id)
             media_id = play_item.url
-            _LOGGER.info(f'Playing media source: {play_item} {media_id}')
+            _LOGGER.debug(f'Playing media source: {play_item} {media_id}')
 
         media_id = async_process_play_media_url(self.hass, media_id)
         if len(self._selected_zones) == 0 and len(self._selected_groups) == 0:
@@ -112,7 +111,7 @@ class AmpliPiAnnouncer(MediaPlayerEntity):
                 groups=self._selected_groups
             )
         )
-        _LOGGER.warning("deselecting due to announcement")
+        _LOGGER.debug("deselecting due to announcement")
         pass
 
     async def async_set_volume_level(self, volume):

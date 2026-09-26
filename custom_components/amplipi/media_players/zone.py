@@ -4,11 +4,10 @@ import logging
 from typing import List, Optional
 
 from homeassistant.components import media_source
-from homeassistant.components.media_player import MediaPlayerDeviceClass
+from homeassistant.components.media_player import MediaPlayerDeviceClass, MediaPlayerState, MediaType
 from homeassistant.components.media_player.browse_media import (
     async_process_play_media_url,
 )
-from homeassistant.const import STATE_PLAYING, STATE_PAUSED, STATE_IDLE, STATE_UNKNOWN, STATE_OFF
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -93,7 +92,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
         # Resume the stream that was playing when the zone/group was turned off, if it still exists
         last_stream = self._find_stream(self._last_stream_id)
         if last_stream is not None and not getattr(last_stream, "disabled", False):
-            _LOGGER.info(f"Turning {self.name} on and resuming {last_stream.name}")
+            _LOGGER.debug(f"Turning {self.name} on and resuming {last_stream.name}")
             try:
                 await self.async_connect_zones_to_stream(last_stream, *self._zone_args())
                 self._is_off = False
@@ -106,7 +105,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
         # this allows it to be configured from HA without forcing a specific connection 
         no_source_update = ZoneUpdate(source_id=-1)
         if self._group is not None:
-            _LOGGER.info(f"Turning group {self.name} on")
+            _LOGGER.debug(f"Turning group {self.name} on")
             await self._update_group(
                 MultiZoneUpdate(
                     groups=[self._group.id],
@@ -114,7 +113,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
                 )
             )
         else:
-            _LOGGER.info(f"Turning zone {self.name} on")
+            _LOGGER.debug(f"Turning zone {self.name} on")
             await self._update_zone(no_source_update)
         self._is_off = False
 
@@ -124,7 +123,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
             self._last_stream_id = self._stream.id
         source_off_update = ZoneUpdate(source_id=-2)
         if self._group is not None:
-            _LOGGER.info(f"Turning group {self.name} off")
+            _LOGGER.debug(f"Turning group {self.name} off")
             await self._update_group(
                 MultiZoneUpdate(
                     groups=[self._group.id],
@@ -132,14 +131,14 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
                 )
             )
         else:
-            _LOGGER.info(f"Turning zone {self.name} off")
+            _LOGGER.debug(f"Turning zone {self.name} off")
             await self._update_zone(source_off_update)
         self._is_off = True
 
     async def async_mute_volume(self, mute):
         if mute is None:
             return
-        _LOGGER.info(f"setting mute to {mute}")
+        _LOGGER.debug(f"setting mute to {mute}")
         if self._group is not None:
             await self._update_group(
                 MultiZoneUpdate(
@@ -163,7 +162,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
         elif self._zone is not None:
             self._zone.vol_f = volume
     
-        _LOGGER.info(f"setting volume to {volume}")
+        _LOGGER.debug(f"setting volume to {volume}")
         if self._group is not None:
             await self._update_group(
                 MultiZoneUpdate(
@@ -181,7 +180,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
     @property
     def media_content_type(self):
         """Content type of current playing media."""
-        return "speaker"
+        return MediaType.MUSIC
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -273,29 +272,12 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
         """Media player state of the zone or group."""
         
         if self._is_off and self._source is None:
-            return STATE_OFF
+            return MediaPlayerState.OFF
         elif self._last_update_successful is False or self._split_group:
-            return STATE_UNKNOWN
+            return None
         elif self._source is None or self._source == -1 or self._source.info is None or self._source.info.state is None:
-            return STATE_IDLE
-        elif self._source.info.state in (
-                'paused'
-        ):
-            return STATE_PAUSED
-        elif self._source.info.state in (
-                'playing'
-        ):
-            return STATE_PLAYING
-        elif self._source.info.state in (
-                'stopped'
-        ):
-            return STATE_IDLE
-        elif self._source.info.state in (
-                'stopped'
-        ):
-            return STATE_IDLE
-
-        return STATE_IDLE
+            return MediaPlayerState.IDLE
+        return self.playback_state()
 
     @property
     def volume_level(self):
@@ -414,7 +396,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
         if media_source.is_media_source_id(media_id):
             play_item = await media_source.async_resolve_media(self.hass, media_id)
             media_id = play_item.url
-            _LOGGER.info(f'Playing media source: {play_item} {media_id}')
+            _LOGGER.debug(f'Playing media source: {play_item} {media_id}')
 
         # No source, see if we can find an empty one and point this zone at it
         if self._source is None:

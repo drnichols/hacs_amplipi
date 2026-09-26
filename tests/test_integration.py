@@ -397,3 +397,15 @@ async def test_no_free_source_raises_translated_error(hass, amplipi, controller)
         await select(hass, "media_player.amplipi_zone_4", "DLNA")
     assert err.value.translation_key == "no_free_source"
     assert "DLNA" in str(err.value)
+
+
+async def test_diagnostics_redacts_host_and_credentials(hass, amplipi, controller):
+    from custom_components.amplipi.diagnostics import async_get_config_entry_diagnostics
+    controller.state["streams"][7].update(user="me@example.com", password="hunter2")
+    entry = await amplipi()
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["entry"]["data"][CONF_HOST] == "**REDACTED**"
+    assert diag["entry"]["data"][CONF_WEBAPP] == "**REDACTED**"
+    assert len(diag["status"]["zones"]) == 6
+    assert "amplipi.local" not in str(diag)
+    assert "hunter2" not in str(diag) and "me@example.com" not in str(diag)

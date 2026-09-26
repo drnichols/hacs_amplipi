@@ -26,6 +26,6 @@ class Status(PyStatus):
     """Collection of PyAmpliPi objects with the PyAmpliPiExtension mixin that allows calls to GET /api to have home assistant entity data encoded within"""
     sources: List[Source] = []
     zones: List[Zone] = []
-    group: List[Group] = []
-    stream: List[Stream] = []
+    groups: List[Group] = []
+    streams: List[Stream] = []
     
