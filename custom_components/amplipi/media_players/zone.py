@@ -98,7 +98,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
                 await self.async_connect_zones_to_stream(last_stream, *self._zone_args())
                 self._is_off = False
                 return
-            except Exception as e:  # pylint: disable=broad-except
+            except HomeAssistantError as e:
                 # No source was free for it, so fall back to turning on without a stream
                 _LOGGER.warning(f"Could not resume {last_stream.name} on {self.name}: {e}")
 
@@ -193,11 +193,6 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
             name = self._zone.original_name
             model = "AmpliPi Zone"
 
-        via_device = None
-
-        if self._source is not None:
-            via_device = (DOMAIN, f"{DOMAIN}_source_{self._source.id}")
-
         return DeviceInfo(
             identifiers={(DOMAIN, self.unique_id)},
             model=model,
@@ -205,7 +200,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
             manufacturer=self._vendor,
             sw_version=self._version,
             configuration_url=self._image_base_path,
-            via_device=via_device,
+            via_device=(DOMAIN, self.coordinator.config_entry.entry_id),
         )
 
     def sync_state(self):
@@ -426,7 +421,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
             self._source = await self.find_source()
             
             if self._source is None:
-                raise Exception("Not attached to a source and all sources are in use. Clear out a source or select an already existing one and try again.")
+                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="no_free_source_for_media")
 
             await self.async_connect_zones_to_source(self._source, *self._zone_args())
                 

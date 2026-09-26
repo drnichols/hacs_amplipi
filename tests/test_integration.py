@@ -4,13 +4,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant.const import CONF_HOST, CONF_ID, CONF_NAME, CONF_PORT
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr, entity_registry as er, issue_registry as ir
 from pyamplipi.amplipi import AmpliPi
 from pyamplipi.models import Status
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.amplipi.const import (
-    DOMAIN, AMPLIPI_OBJECT, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_API_PATH,
+    DOMAIN, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_API_PATH,
     CONF_RESERVED_RCA, CONF_SHOW_BUS_STREAM_ENTITIES, CONF_IDLE_GRACE_SECONDS,
 )
 
@@ -142,7 +144,7 @@ async def select(hass, entity_id, source):
 
 
 async def refresh(hass, entry):
-    coordinator = hass.data[DOMAIN][entry.entry_id][AMPLIPI_OBJECT]
+    coordinator = entry.runtime_data
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     return coordinator
@@ -307,7 +309,7 @@ async def test_switching_stream_reuses_own_bus_when_all_busy(hass, amplipi, cont
 
 async def test_next_track_calls_next_not_previous(hass, amplipi, controller):
     entry = await amplipi()
-    coordinator = hass.data[DOMAIN][entry.entry_id][AMPLIPI_OBJECT]
+    coordinator = entry.runtime_data
     with patch.object(AmpliPi, "next_stream", create=True, return_value=controller.status()) as nxt, \
             patch.object(AmpliPi, "previous_stream", create=True, return_value=controller.status()) as prev:
         await coordinator.next_stream(1000)
@@ -348,3 +350,50 @@ async def test_source_turn_off_and_on_updates_state(hass, amplipi, controller):
     assert hass.states.get("media_player.amplipi_source_0").state == "off"
     await hass.services.async_call("media_player", "turn_on", {"entity_id": "media_player.amplipi_source_0"}, blocking=True)
     assert hass.states.get("media_player.amplipi_source_0").state != "off"
+
+
+async def test_unreachable_controller_retries_setup(hass, controller):
+    async def unreachable():
+        raise TimeoutError
+    controller.get_status = unreachable
+    entry = MockConfigEntry(domain=DOMAIN, version=1, minor_version=2, data={
+        CONF_NAME: "AmpliPi", CONF_HOST: "amplipi.local", CONF_PORT: 80, CONF_ID: "test",
+        CONF_VENDOR: "micro-nova", CONF_VERSION: "0.4.9", CONF_WEBAPP: "http://amplipi.local", CONF_API_PATH: "/api",
+    })
+    entry.add_to_hass(hass)
+    with patch.object(AmpliPi, "get_status", controller.get_status, create=True), \
+            patch("custom_components.amplipi.async_get_clientsession", return_value=MagicMock()):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_old_firmware_raises_one_repair_issue(hass, amplipi, controller):
+    controller.state["info"]["version"] = "0.4.0"
+    entry = await amplipi()
+    await refresh(hass, entry)
+    issues = [i for (domain, _), i in ir.async_get(hass).issues.items() if domain == DOMAIN]
+    assert len(issues) == 1
+    assert issues[0].translation_key == "firmware_too_old"
+
+
+async def test_zones_hang_off_controller_device(hass, amplipi, controller):
+    entry = await amplipi()
+    await select(hass, "media_player.amplipi_zone_0", "Spotify")
+    devices = dr.async_get(hass)
+    controller_device = devices.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    assert controller_device is not None
+    zone_entity = er.async_get(hass).async_get("media_player.amplipi_zone_0")
+    zone_device = devices.async_get(zone_entity.device_id)
+    assert zone_device.via_device_id == controller_device.id
+
+
+async def test_no_free_source_raises_translated_error(hass, amplipi, controller):
+    from homeassistant.exceptions import HomeAssistantError
+    await amplipi()
+    for zone, stream in ((0, "Spotify"), (1, "AirPlay"), (2, "Radio"), (3, "Pandora")):
+        await select(hass, f"media_player.amplipi_zone_{zone}", stream)
+    with pytest.raises(HomeAssistantError) as err:
+        await select(hass, "media_player.amplipi_zone_4", "DLNA")
+    assert err.value.translation_key == "no_free_source"
+    assert "DLNA" in str(err.value)

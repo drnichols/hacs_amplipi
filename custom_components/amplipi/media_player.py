@@ -1,11 +1,9 @@
 """Support for interfacing with the AmpliPi Multizone home audio controller."""
 # pylint: disable=W1203
 from homeassistant.components.media_player import MediaPlayerEntity
-from homeassistant.const import CONF_NAME
 
 from .coordinator import AmpliPiDataClient
-from .const import (
-    DOMAIN, AMPLIPI_OBJECT, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_SHOW_BUS_STREAM_ENTITIES, )
+from .const import DOMAIN, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_SHOW_BUS_STREAM_ENTITIES
 
 from .media_players.base import AmpliPiMediaPlayer
 from .media_players.source import AmpliPiSource
@@ -15,15 +13,12 @@ from .media_players.announce import AmpliPiAnnouncer
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Set up the AmpliPi MultiZone Audio Controller"""
-    hass_entry = hass.data[DOMAIN][config_entry.entry_id]
+    amplipi_coordinator: AmpliPiDataClient = config_entry.runtime_data
+    vendor = config_entry.data[CONF_VENDOR]
+    version = config_entry.data[CONF_VERSION]
+    image_base_path = config_entry.data[CONF_WEBAPP]
 
-    amplipi_coordinator: AmpliPiDataClient = hass_entry[AMPLIPI_OBJECT]
-    vendor = hass_entry[CONF_VENDOR]
-    name = hass_entry[CONF_NAME]
-    version = hass_entry[CONF_VERSION]
-    image_base_path = f'{hass_entry[CONF_WEBAPP]}'
-
-    status = amplipi_coordinator.data if amplipi_coordinator.data is not None else await amplipi_coordinator.get_status()
+    status = amplipi_coordinator.data
     sources: list[AmpliPiMediaPlayer] = [
         AmpliPiSource(DOMAIN, source, status.streams, vendor, version, image_base_path, amplipi_coordinator)
         for source in status.sources]

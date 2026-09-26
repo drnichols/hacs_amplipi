@@ -8,6 +8,7 @@ from typing import List, Optional
 import validators
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components import persistent_notification
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.components.media_player import MediaPlayerEntity, MediaPlayerEntityFeature
 from pyamplipi.models import ZoneUpdate, SourceUpdate, MultiZoneUpdate
 
@@ -42,7 +43,7 @@ SUPPORT_LOOKUP_DICT = {
     'prev': MediaPlayerEntityFeature.PREVIOUS_TRACK,
 }
 
-class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
+class AmpliPiMediaPlayer(CoordinatorEntity[AmpliPiDataClient], MediaPlayerEntity):
     """
         Parent class of all AmpliPi MediaPlayer entities. Used to enforce common variables and provide shared functionality.
     """
@@ -53,13 +54,13 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
     _unique_id: str
 
     # Lists of zones and groups related to the entity, either because the entity is a zone or a group or because they're connected to the entity
-    _zones: list[Zone] = []
-    _groups: List[Group] = []
+    _zones: List[Zone]
+    _groups: List[Group]
     _stream: Optional[Stream] = None
     _source: Optional[Source] = None
 
     # List of all known streams
-    _streams: List[Stream] = []
+    _streams: List[Stream]
 
     # Home assistant particulars that are populated at entity instantiation via hass
     _vendor: str
@@ -73,7 +74,7 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
     _last_update_successful: bool = False
 
     # List of various arbitrary extra state attributes. Home assistant expects this list to exist, but it doesn't necessarily contain anything in most of our cases.
-    _extra_attributes: dict = {}
+    _extra_attributes: dict
 
     # Does home assistant let you interact with the entity? False by default, made true if the entity is able to poll properly.
     _available: bool = False
@@ -83,6 +84,14 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
 
     # The displayname of the entity. Also what is passed to async_select_source via dropdown menus.
     _name: str
+
+    def __init__(self, coordinator: AmpliPiDataClient):
+        super().__init__(coordinator)
+        # Per-instance, so entities never share (and mutate) one list
+        self._zones = []
+        self._groups = []
+        self._streams = []
+        self._extra_attributes = {}
 
     def available_streams(self, source: Source):
         """Returns the available streams (generally all of them minus three of the four RCAs) relative to the provided source"""
@@ -107,7 +116,10 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
             # RCAs are hardware constrained to only being able to use one specific source
             # If that source is busy, free it up without interrupting a users music
             if self._source is not None and source is not None and source.id != self._source.id:
-                raise Exception("RCA streams can only connect to sources with the same ID")
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="rca_fixed_source",
+                    translation_placeholders={"stream": stream.name, "source": str(get_fixed_source_id(stream) + 1)},
+                )
 
             state = self._data_client.data
             source = state.sources[get_fixed_source_id(stream)]
@@ -121,8 +133,10 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
         else:
             source_id = routing.pick_bus(self._data_client.data, stream, self._data_client.reserved_buses, leaving=leaving or ())
             if source_id is None:
-                persistent_notification.create(self.hass, f"Stream {stream.name} could not find an available source to connect to, all sources in use.\n\nPlease disconnect a source or provide one to override and try again.", f"{self._name} could not connect", f"{self._id}_connection_error")
-                raise Exception("All sources are in use, disconnect a source or select one to override and try again.")
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="no_free_source",
+                    translation_placeholders={"stream": stream.name},
+                )
             
         if source_id is not None:
             await self._data_client.set_source(

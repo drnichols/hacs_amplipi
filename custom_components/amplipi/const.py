@@ -3,9 +3,10 @@
 DOMAIN = "amplipi"
 CONF_VENDOR = "vendor"
 CONF_VERSION = "version"
-AMPLIPI_OBJECT = "amplipi_object"
 CONF_WEBAPP = "webapp"
 CONF_API_PATH = "api_path"
+
+MINIMUM_FIRMWARE = "0.4.7"
 
 # Options
 CONF_RESERVED_RCA = "reserved_rca_inputs"

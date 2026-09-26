@@ -40,5 +40,22 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "no_free_source": {
+      "message": "{stream} couldn't find a free source: all 4 are in use. Stop something that's playing and try again."
+    },
+    "no_free_source_for_media": {
+      "message": "All 4 sources are in use, so there's nowhere to play this. Stop something that's playing and try again."
+    },
+    "rca_fixed_source": {
+      "message": "{stream} can only play on source {source}."
+    }
+  },
+  "issues": {
+    "firmware_too_old": {
+      "title": "AmpliPi firmware is too old",
+      "description": "Your AmpliPi is running version {version}, but this integration needs at least {minimum} to work properly. Update it from {update_url}, then restart Home Assistant."
+    }
   }
 }
