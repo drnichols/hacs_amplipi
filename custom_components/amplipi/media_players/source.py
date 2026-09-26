@@ -3,11 +3,10 @@
 import logging
 from typing import List
 from homeassistant.components import media_source
-from homeassistant.components.media_player import MediaType
+from homeassistant.components.media_player import MediaPlayerState, MediaType
 from homeassistant.components.media_player.browse_media import (
     async_process_play_media_url,
 )
-from homeassistant.const import STATE_PLAYING, STATE_PAUSED, STATE_IDLE, STATE_UNKNOWN, STATE_OFF
 from pyamplipi.models import ZoneUpdate, SourceUpdate, GroupUpdate, MultiZoneUpdate, PlayMedia
 
 from .base import AmpliPiMediaPlayer
@@ -50,12 +49,13 @@ class AmpliPiSource(AmpliPiMediaPlayer):
     async def async_turn_on(self):
         # Unlike zones and groups, sources don't have anything within them on the amplipi side that says they're off
         # Flipping the value of _is_off only effects what "@property state" later on outputs
-        _LOGGER.info(f"Turning source {self._name} on")
+        _LOGGER.debug(f"Turning source {self._name} on")
         self._is_off = False
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         if self._source is not None:
-            _LOGGER.info(f"Turning source {self._name} off, disconnecting all zones and streams")
+            _LOGGER.debug(f"Turning source {self._name} off, disconnecting all zones and streams")
             await self._data_client.set_source(
                 self._id,
                 SourceUpdate(
@@ -72,13 +72,14 @@ class AmpliPiSource(AmpliPiMediaPlayer):
                 )
             )
             self._is_off = True
+            self.async_write_ha_state()
 
     async def async_mute_volume(self, mute):
         if mute is None:
             return
 
         if self._source is not None:
-            _LOGGER.info(f"setting mute to {mute}")
+            _LOGGER.debug(f"setting mute to {mute}")
             await self._update_zones(
                 MultiZoneUpdate(
                     zones=[z.id for z in self._zones],
@@ -92,7 +93,7 @@ class AmpliPiSource(AmpliPiMediaPlayer):
     async def async_set_volume_level(self, volume):
         if volume is None:
             return
-        _LOGGER.info(f"setting volume to {volume}")
+        _LOGGER.debug(f"setting volume to {volume}")
         
         group = next(filter(lambda z: z.vol_f is not None, self._groups), None)
         zone = next(filter(lambda z: z.vol_f is not None, self._zones), None)
@@ -131,7 +132,7 @@ class AmpliPiSource(AmpliPiMediaPlayer):
         if media_source.is_media_source_id(media_id):
             play_item = await media_source.async_resolve_media(self.hass, media_id)
             media_id = play_item.url
-            _LOGGER.info(f'Playing media source: {play_item} {media_id}')
+            _LOGGER.debug(f'Playing media source: {play_item} {media_id}')
 
         media_id = async_process_play_media_url(self.hass, media_id)
         await self._data_client.play_media(
@@ -172,15 +173,6 @@ class AmpliPiSource(AmpliPiMediaPlayer):
                 _LOGGER.warning(f'Select Source {source} called but a match could not be found in the stream cache, '
                                 f'{self._streams}')
 
-    def clear_playlist(self):
-        pass
-
-    def set_shuffle(self, shuffle):
-        pass
-
-    def set_repeat(self, repeat):
-        pass
-
     @property
     def media_content_type(self):
         """Content type of current playing media."""
@@ -188,7 +180,7 @@ class AmpliPiSource(AmpliPiMediaPlayer):
 
     def sync_state(self):
         """Retrieve latest state."""
-        _LOGGER.info(f'Retrieving state for source {self._source.id}')
+        _LOGGER.debug(f'Retrieving state for source {self._source.id}')
         state = self._data_client.data
         if state is not None:
             try:
@@ -218,33 +210,15 @@ class AmpliPiSource(AmpliPiMediaPlayer):
 
     @property
     def state(self):
-        """Update local states and return the media player state of the source."""
-        self.sync_state()
+        """Media player state of the source."""
         
         if self._is_off and self._stream is None:
-            return STATE_OFF
+            return MediaPlayerState.OFF
         elif self._last_update_successful is False:
-            return STATE_UNKNOWN
+            return None
         elif self._source.info is None or self._source.info.state is None or self._source.info.state == "disconnected":
-            return STATE_IDLE
-        elif self._source.info.state in (
-                'paused'
-        ):
-            return STATE_PAUSED
-        elif self._source.info.state in (
-                'playing'
-        ):
-            return STATE_PLAYING
-        elif self._source.info.state in (
-                'stopped'
-        ):
-            return STATE_IDLE
-        elif self._source.info.state in (
-                'stopped'
-        ):
-            return STATE_IDLE
-
-        return STATE_IDLE
+            return MediaPlayerState.IDLE
+        return self.playback_state()
 
     @property
     def volume_level(self):

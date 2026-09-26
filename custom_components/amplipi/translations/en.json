@@ -1,27 +1,61 @@
 {
-    "config": {
-        "abort": {
-            "no_devices_found": "No devices found on the network",
-            "single_instance_allowed": "Already configured. Only a single configuration possible."
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user_confirm": {
+        "title": "Connect to AmpliPi",
+        "description": "Enter the address of your AmpliPi controller.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
         },
-        "step": {
-            "discovery_confirm": {
-                "description": "Do you want to start set up?"
-            }
+        "data_description": {
+          "host": "Hostname or IP address of the AmpliPi controller, for example amplipi.local.",
+          "port": "Port the AmpliPi web app and API are served on, usually 80."
         }
+      },
+      "discovery_confirm": {
+        "title": "Discovered AmpliPi",
+        "description": "Set up {name} at {host}?"
+      }
     },
-    "options": {
-        "step": {
-            "init": {
-                "title": "AmpliPi options",
-                "description": "AmpliPi has 4 buses, so at most 4 things can play at once. RCA Input N can only ever play on bus N.",
-                "data": {
-                    "reserved_rca_inputs": "Reserve buses for these RCA inputs (other streams only borrow them when every other bus is in use)",
-                    "free_idle_buses": "Free a bus once no zone is listening to it",
-                    "idle_grace_seconds": "Seconds a bus can sit unlistened before it is freed (changes made outside Home Assistant)",
-                    "show_bus_stream_entities": "Show bus (Source 1-4) and stream media players"
-                }
-            }
-        }
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AmpliPi options",
+        "description": "AmpliPi has 4 buses, so at most 4 things can play at once. RCA Input N can only ever play on bus N.",
+        "data": {
+          "reserved_rca_inputs": "Reserve buses for these RCA inputs (other streams only borrow them when every other bus is in use)",
+          "free_idle_buses": "Free a bus once no zone is listening to it",
+          "idle_grace_seconds": "Seconds a bus can sit unlistened before it is freed (changes made outside Home Assistant)",
+          "show_bus_stream_entities": "Show bus (Source 1-4) and stream media players"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "no_free_source": {
+      "message": "{stream} couldn't find a free source: all 4 are in use. Stop something that's playing and try again."
+    },
+    "no_free_source_for_media": {
+      "message": "All 4 sources are in use, so there's nowhere to play this. Stop something that's playing and try again."
+    },
+    "rca_fixed_source": {
+      "message": "{stream} can only play on source {source}."
+    }
+  },
+  "issues": {
+    "firmware_too_old": {
+      "title": "AmpliPi firmware is too old",
+      "description": "Your AmpliPi is running version {version}, but this integration needs at least {minimum} to work properly. Update it from {update_url}, then restart Home Assistant."
+    }
+  }
 }

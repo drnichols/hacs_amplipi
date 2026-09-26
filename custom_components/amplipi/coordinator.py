@@ -5,14 +5,12 @@
 import time
 from datetime import timedelta
 from typing import Optional, Union, Callable, Iterable, Set
-from packaging.version import Version
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
-from homeassistant.components import persistent_notification
 
 from pyamplipi.amplipi import AmpliPi
-from pyamplipi.models import SourceUpdate, ZoneUpdate, MultiZoneUpdate, GroupUpdate, PlayMedia, Announcement, Status as PyStatus, Source as PySource, Stream as PyStream, Group as PyGroup, Zone as PyZone, Status as PyStatus
+from pyamplipi.models import SourceUpdate, ZoneUpdate, MultiZoneUpdate, GroupUpdate, PlayMedia, Announcement, Source as PySource, Stream as PyStream, Group as PyGroup, Zone as PyZone
 
 from .models import Status, Source, Zone, Group, Stream
 from .const import (
@@ -28,8 +26,8 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
             logger,
             config_entry=config_entry,
             name="hacs_amplipi",
-            update_interval=timedelta(seconds=2),
-            always_update=True
+            update_interval=timedelta(seconds=30),
+            always_update=False
         )
 
         AmpliPi.__init__(
@@ -102,22 +100,27 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
         
     async def get_entity_id_from_unique_id(self, unique_id: str):
         """Gets entity_id from the entity registry using the unique_id"""
-        registry = async_get_entity_registry(self.hass)
-        for entry in registry.entities.values():
-            if entry.unique_id == unique_id:
-                return entry.entity_id
-        return None
+        return async_get_entity_registry(self.hass).async_get_entity_id("media_player", DOMAIN, unique_id)
     
     async def _async_update_data(self) -> Status:
         """Fetch data from API endpoint and pre-process into lookup tables."""
-        return await self.get_status()
-        
+        try:
+            resp = await super().get_status()
+        except Exception as e:
+            raise UpdateFailed(f"Error fetching data: {e}") from e
+        status = await self.build_status(resp.model_dump())
+        self._sweep_idle_buses(status)
+        return status
 
-    async def set_data(self, state: PyStatus) -> Status:
-        """
-        Take in a Status object from the AmpliPi API and add home assistant specific encoding to it before pushing it to global state.
-        Returns the newly encoded Status object just so that _async_update_data has something to return as well.
-        """
+    async def set_data(self, state: dict) -> Status:
+        """Publish the Status returned by a command, so entities update without waiting for the next poll"""
+        status = await self.build_status(state)
+        self.async_set_updated_data(status)
+        self._sweep_idle_buses(status)
+        return status
+
+    async def build_status(self, state: dict) -> Status:
+        """Take in a Status from the AmpliPi API and add home assistant specific encoding to it"""
         async def build_entity(entity: Union[PySource, PyZone, PyGroup, PyStream], kind: str, cls, original_name: str):
             try:
                 unique_id = f"{DOMAIN}_{kind}_{entity['id']}"
@@ -155,15 +158,7 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
                 for entity in state["streams"]
             ]
 
-            minimum_version = "0.4.7"
-            current_version = state["info"]["version"]
-            if Version(current_version) < Version(minimum_version):
-                persistent_notification.create(self.hass, f"AmpliPi version must be at least {minimum_version} to work properly, please go to http://amplipi.local:5001/update to correct this", "AmpliPi version too low", f"{current_version}_version_error")
-
-            status = Status(**state)
-            self.async_set_updated_data(status)
-            self._sweep_idle_buses(status)
-            return status
+            return Status(**state)
 
         except Exception as e:
             raise UpdateFailed(f"Error fetching data: {e}") from e
@@ -174,7 +169,7 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
         """Intercept the return of a function and consume the data into the data coordinator"""
         async def wrapper(self, *args, **kwargs):
             resp = await func(self, *args, **kwargs)
-            return await self.set_data(resp.dict())
+            return await self.set_data(resp.model_dump())
         return wrapper
 
     def release_abandoned_buses(func: Callable):
@@ -241,7 +236,7 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
 
     @intercept_and_consume
     async def next_stream(self, stream_id: int) -> Status:
-        return await super().previous_stream(stream_id)
+        return await super().next_stream(stream_id)
 
     @intercept_and_consume
     async def stop_stream(self, stream_id: int) -> Status:

@@ -3,7 +3,7 @@
 import logging
 from typing import List, Optional
 
-from homeassistant.const import STATE_PLAYING, STATE_PAUSED, STATE_IDLE, STATE_UNKNOWN, STATE_OFF
+from homeassistant.components.media_player import MediaPlayerState, MediaType
 from pyamplipi.models import ZoneUpdate, SourceUpdate, MultiZoneUpdate
 
 from .base import AmpliPiMediaPlayer
@@ -79,11 +79,12 @@ class AmpliPiStream(AmpliPiMediaPlayer):
                 await self.async_connect_stream_to_source(self._stream, goal_source)
 
         self._is_off = False
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         try:
             if self._source is not None:
-                _LOGGER.info(f"Disconnecting stream from source {self._source.name}")
+                _LOGGER.debug(f"Disconnecting stream from source {self._source.name}")
                 await self._update_zones(
                     ZoneUpdate(
                         source_id=-1,
@@ -102,6 +103,7 @@ class AmpliPiStream(AmpliPiMediaPlayer):
             _LOGGER.debug(f"{self._name} had trouble disconnecting from a source")
         finally:
             self._is_off = True
+            self.async_write_ha_state()
             
 
     async def async_mute_volume(self, mute):
@@ -109,7 +111,7 @@ class AmpliPiStream(AmpliPiMediaPlayer):
             return
 
         if self._source is not None:
-            _LOGGER.info(f"setting mute to {mute}")
+            _LOGGER.debug(f"setting mute to {mute}")
             await self._update_zones(
                 ZoneUpdate(
                     mute=mute,
@@ -130,11 +132,11 @@ class AmpliPiStream(AmpliPiMediaPlayer):
     @property
     def media_content_type(self):
         """Content type of current playing media."""
-        return "speaker"
+        return MediaType.MUSIC
 
     def sync_state(self):
         """Retrieve latest state."""
-        _LOGGER.info(f'Retrieving state for stream {self._id}')
+        _LOGGER.debug(f'Retrieving state for stream {self._id}')
         state = self._data_client.data
         if state is not None:
             groups = []
@@ -149,14 +151,14 @@ class AmpliPiStream(AmpliPiMediaPlayer):
                         zones = [zone for zone in state.zones if zone.source_id == current_source.id]
                 else:
                     self._last_update_successful = False
+                    self._available = False
                     return
             except Exception as e:
                 self._last_update_successful = False
                 _LOGGER.error(f'Could not update stream {self._id} due to error: {e}')
                 return
 
-            self._available = self._stream is not None
-
+            self._available = True
             self._stream = stream
             self._sources = state.sources
             self._source = current_source
@@ -169,28 +171,14 @@ class AmpliPiStream(AmpliPiMediaPlayer):
 
     @property
     def state(self):
-        """Update local states and return the media player state of the stream."""
-        self.sync_state()
-
+        """Media player state of the stream."""
         if self._is_off and self._source is None:
-            return STATE_OFF
+            return MediaPlayerState.OFF
         elif self._last_update_successful is False:
-            return STATE_UNKNOWN
+            return None
         elif self._source is None or self._source.id == -1 or self._source.info is None or self._source.info.state is None:
-            return STATE_IDLE
-        elif self._source.info.state in (
-                'paused'
-        ):
-            return STATE_PAUSED
-        elif self._source.info.state in (
-                'playing'
-        ):
-            return STATE_PLAYING
-        elif self._source.info.state in (
-                'stopped'
-        ):
-            return STATE_IDLE
-        return STATE_IDLE
+            return MediaPlayerState.IDLE
+        return self.playback_state()
 
 
     @property
@@ -244,8 +232,3 @@ class AmpliPiStream(AmpliPiMediaPlayer):
     @property
     def extra_state_attributes(self):
         return {"stream_type" : self._stream.type}
-
-    async def _update_available(self):
-        if self._stream is None:
-            return False
-        return True
