@@ -10,6 +10,18 @@ from pyamplipi.models import Source, Stream, Zone, Status
 RCA_STREAM_IDS = (996, 997, 998, 999)
 EMPTY_INPUTS = ('', 'None', None)
 
+# Music Assistant's AmpliPi provider plays through internetradio streams it names "Music Assistant <bus>"
+MUSIC_ASSISTANT_STREAM_TYPE = "internetradio"
+MUSIC_ASSISTANT_STREAM_PREFIX = "Music Assistant "
+
+
+def is_music_assistant_stream(stream: Stream) -> bool:
+    """Is this one of the streams Music Assistant creates and drives. Matches Music Assistant's own rule, so a user stream such as "Music Assistant Radio" isn't caught"""
+    name = stream.name or ""
+    if stream.type != MUSIC_ASSISTANT_STREAM_TYPE or not name.startswith(MUSIC_ASSISTANT_STREAM_PREFIX):
+        return False
+    return name[len(MUSIC_ASSISTANT_STREAM_PREFIX):].strip().isdigit()
+
 
 def is_bus_empty(source: Source) -> bool:
     """Does the bus have no stream on it"""

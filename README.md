@@ -52,6 +52,16 @@ Open **Settings → Devices & services → AmpliPi → Configure** to change:
 - **Grace period**: how long, in seconds, a source set up outside Home Assistant can sit unlistened before it's freed.
 - **Show bus and stream media players**: also creates the Source 1–4 and per-stream media players. This is on for installs that existed before this option was added, and off for new ones. The Start Streaming blueprint below needs it turned on.
 
+## Using with Music Assistant
+[Music Assistant](https://music-assistant.io/player-support/amplipi/) 2.10 and later has its own AmpliPi provider. It talks to the AmpliPi directly and runs alongside this integration, so both share the same 4 sources:
+- **Streaming format**: keep Music Assistant's default FLAC. AmpliPi's outputs run at 48 kHz, so in each AmpliPi player's advanced settings in Music Assistant set the supported sample rate to 48 kHz / 16-bit. Music Assistant then resamples once on the server instead of the AmpliPi doing it. Higher rates gain nothing.
+- **Grouping**: while Music Assistant is playing, group zones in Music Assistant, not with `media_player.join` on these entities. Music Assistant only remembers the zones it grouped, and disconnects any other zone on its source the next time it starts playing.
+- **AmpliPi groups** aren't shown in Music Assistant, which only sees zones. Recreate them as Music Assistant sync groups.
+- **Announcements**: Music Assistant can't announce on AmpliPi, so keep using the Announce entity here for text-to-speech.
+- **Music Assistant's streams** ("Music Assistant 1" etc.) are hidden from the source lists here, but a zone playing from Music Assistant still shows one as its current source.
+- Don't also add these entities to Music Assistant through its Home Assistant player provider, or every zone appears twice.
+- Volume is scaled differently: 50% in Music Assistant isn't the same level as 50% here.
+
 ## Optional Setup
 This component has an optional companion component that can be found at https://github.com/micro-nova/AmpliPi-HomeAssistant-Card if you wish to use home assistant as a ui for your AmpliPi software. You can install that by first installing the [MiniMediaPlayer](https://github.com/kalkih/mini-media-player) component which can be found by searching for it in the HACS searchbar, and then following the same installation guide as this component but replacing the repository link with https://github.com/micro-nova/AmpliPi-HomeAssistant-Card and with type "Dashboard"
 
