@@ -12,6 +12,8 @@ from homeassistant.components.media_player import MediaPlayerEntity, MediaPlayer
 from pyamplipi.models import ZoneUpdate, SourceUpdate, MultiZoneUpdate
 
 from ..utils import get_fixed_source_id, has_fixed_source, extract_amplipi_id_from_unique_id
+from .. import routing
+from ..const import DOMAIN
 from ..coordinator import AmpliPiDataClient
 from ..models import Source, Group, Zone, Stream
 
@@ -97,8 +99,8 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
                         streams.append(entry.friendly_name if entry.friendly_name not in [None, 'None'] else entry.original_name)
         return streams
     
-    async def async_connect_stream_to_source(self, stream: Stream, source: Optional[Source] = None):
-        """Connects the stream to a source. If a source is not provided, searches for an available source."""
+    async def async_connect_stream_to_source(self, stream: Stream, source: Optional[Source] = None, leaving: Optional[List[int]] = None):
+        """Connects the stream to a source. If a source is not provided, picks one with routing.pick_bus, which respects buses reserved for RCA inputs."""
         _LOGGER.info(f"Stream {stream.name} attempting to connect to source {source}")
         source_id = None
         if has_fixed_source(stream):
@@ -111,16 +113,14 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
             source = state.sources[get_fixed_source_id(stream)]
             # It would be cleaner to do the following, but pyamplipi doesn't support RCA stream's index value atm:
             # source = state.sources[self._stream.index]
-            if source.input not in [None, "None"]:
-                await self.swap_source(source.id)
+            if source.input not in routing.EMPTY_INPUTS and source.input != routing.stream_input(stream.id):
+                await self.reclaim_rca_source(stream, source.id)
 
         if source is not None:
             source_id = source.id
         else:
-            available_source = await self.find_source()
-            if available_source:
-               source_id = available_source.id
-            else:
+            source_id = routing.pick_bus(self._data_client.data, stream, self._data_client.reserved_buses, leaving=leaving or ())
+            if source_id is None:
                 persistent_notification.create(self.hass, f"Stream {stream.name} could not find an available source to connect to, all sources in use.\n\nPlease disconnect a source or provide one to override and try again.", f"{self._name} could not connect", f"{self._id}_connection_error")
                 raise Exception("All sources are in use, disconnect a source or select one to override and try again.")
             
@@ -132,6 +132,39 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
                 )
             )
             return source_id
+
+    async def reclaim_rca_source(self, rca: Stream, source_id: int):
+        """
+            Clear an RCA's fixed source so the RCA can play on it\n
+            The stream already on it is moved to another source along with its zones. If no other source is available, the RCA wins:
+            the zones listening to that stream are disconnected and a notification says which ones.
+        """
+        state = self._data_client.data
+        borrower = routing.stream_on_bus(state, source_id)
+        if borrower is None or borrower.type == "rca":
+            return
+
+        new_source = routing.pick_bus(state, None, self._data_client.reserved_buses, exclude={source_id})
+        if new_source is not None:
+            await self.swap_source(source_id, new_source)
+            return
+
+        cut_off = routing.listening_zones(state, source_id)
+        _LOGGER.warning(f"{rca.name} needs source {source_id + 1}, disconnecting {borrower.name} from {[z.name for z in cut_off]}")
+        if cut_off:
+            await self._data_client.set_zones(
+                MultiZoneUpdate(
+                    zones=[z.id for z in cut_off],
+                    update=ZoneUpdate(source_id=-1)
+                )
+            )
+            persistent_notification.create(
+                self.hass,
+                f"{rca.name} can only play on source {source_id + 1}, which {borrower.name} was using, and no other source was free.\n\n"
+                f"Disconnected: {', '.join(z.name for z in cut_off)}",
+                f"{borrower.name} stopped for {rca.name}",
+                f"{DOMAIN}_rca_reclaim_{source_id}",
+            )
     
     async def async_connect_zones_to_source(self, source: Source, zones: Optional[List[int]], groups: Optional[List[int]]):
         """Connects zones and/or groups to the provided source"""
@@ -149,9 +182,15 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
     async def async_connect_zones_to_stream(self, stream: Stream, zones: Optional[List[int]], groups: Optional[List[int]]):
         """Connects zones and/or groups to the source of the selected stream. If stream does not have a source, select one"""
         state = self._data_client.data
-        source_id = next((s.id for s in state.sources if s.input == f"stream={stream.id}"), None)
+        source_id = routing.bus_for_stream(state, stream.id)
         if source_id is None:
-            source_id = await self.async_connect_stream_to_source(stream)
+            # The zones being moved stop listening to their current source, so it can be reused if nothing else is free
+            leaving = set(zones or [])
+            for group in state.groups:
+                if group.id in (groups or []):
+                    leaving |= set(group.zones)
+            source_id = await self.async_connect_stream_to_source(stream, leaving=list(leaving))
+            state = self._data_client.data
         
         if source_id is not None:
             await self.async_connect_zones_to_source(state.sources[source_id], zones, groups)
@@ -192,13 +231,13 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
             self._attr_media_image_url = None
             self._attr_media_channel = None
 
-    async def find_source(self) -> Source:
-        """Find first available source and return it. If no sources are available, returns None."""
-        sources = await self._data_client.get_sources()
-        for source in sources:
-            if source.input in ['', 'None', None]:
-                return source
-        return None
+    async def find_source(self, exclude=()) -> Optional[Source]:
+        """Find an available source for a new stream and return it, skipping sources reserved for RCA inputs until every other source is in use. If no sources are available, returns None."""
+        state = self._data_client.data
+        if state is None:
+            state = await self._data_client.get_status()
+        source_id = routing.pick_bus(state, None, self._data_client.reserved_buses, exclude)
+        return next((s for s in state.sources if s.id == source_id), None)
     
     async def swap_source(self, old_source: int, new_source: Optional[int] = None):
         """Moves a stream from one source to another, ensuring all zones follow. Generally only used for RCA streams, but able to be used by anyone."""
@@ -208,7 +247,7 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
         if moved_stream is not None and moved_stream.type != "rca":
             # RCA streams each have an associated source to output them due to hardware constraints
             if new_source is None:
-                source = await self.find_source()
+                source = await self.find_source(exclude={old_source})
                 if source:
                     new_source = source.id
 

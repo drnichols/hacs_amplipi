@@ -1,7 +1,7 @@
 """Support for interfacing with the AmpliPi Multizone home audio controller's audio outputs (Zones, Groups)."""
 # pylint: disable=W1203
 import logging
-from typing import List
+from typing import List, Optional
 
 from homeassistant.components import media_source
 from homeassistant.components.media_player import MediaPlayerDeviceClass
@@ -9,20 +9,23 @@ from homeassistant.components.media_player.browse_media import (
     async_process_play_media_url,
 )
 from homeassistant.const import STATE_PLAYING, STATE_PAUSED, STATE_IDLE, STATE_UNKNOWN, STATE_OFF
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.restore_state import RestoreEntity
 from pyamplipi.models import ZoneUpdate, MultiZoneUpdate, PlayMedia
 
 from .base import AmpliPiMediaPlayer
 from ..coordinator import AmpliPiDataClient
 from ..const import DOMAIN
 from ..models import Source, Group, Zone, Stream
+from .. import routing
 
 _LOGGER = logging.getLogger(__name__)
 
-class AmpliPiZone(AmpliPiMediaPlayer):
+class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
     """Representation of an AmpliPi Zone and/or Group. Supports Audio volume
-        and mute controls and the ability to change the current 'source' a
-        zone is tied to"""
+        and mute controls and the ability to pick the stream a zone plays.
+        The source (bus) carrying the stream is chosen automatically"""
 
     def __init__(self, namespace: str, zone: Zone, group: Group,
                  streams: List[Stream], sources: List[Source],
@@ -53,14 +56,15 @@ class AmpliPiZone(AmpliPiMediaPlayer):
         self._version = version
         self._enabled = False
         self._data_client = client
-        self._attr_source_list = [
-            'None',
-            'Source 1',
-            'Source 2',
-            'Source 3',
-            'Source 4',
-        ]
+        # The stream to resume when turned back on, kept across restarts via RestoreEntity
+        self._last_stream_id: Optional[int] = None
         self._attr_device_class = MediaPlayerDeviceClass.SPEAKER
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            self._last_stream_id = last_state.attributes.get("last_stream_id")
 
     def get_original_name(self):
         """
@@ -75,7 +79,29 @@ class AmpliPiZone(AmpliPiMediaPlayer):
         else:
             await self.async_turn_off()
 
+    def _zone_args(self):
+        """The (zones, groups) arguments that address this entity in a MultiZoneUpdate"""
+        return (None, [self._id]) if self._group is not None else ([self._id], None)
+
+    def _find_stream(self, stream_id: Optional[int]) -> Optional[Stream]:
+        state = self._data_client.data
+        if state is None or stream_id is None:
+            return None
+        return next((s for s in state.streams if s.id == stream_id), None)
+
     async def async_turn_on(self):
+        # Resume the stream that was playing when the zone/group was turned off, if it still exists
+        last_stream = self._find_stream(self._last_stream_id)
+        if last_stream is not None and not getattr(last_stream, "disabled", False):
+            _LOGGER.info(f"Turning {self.name} on and resuming {last_stream.name}")
+            try:
+                await self.async_connect_zones_to_stream(last_stream, *self._zone_args())
+                self._is_off = False
+                return
+            except Exception as e:  # pylint: disable=broad-except
+                # No source was free for it, so fall back to turning on without a stream
+                _LOGGER.warning(f"Could not resume {last_stream.name} on {self.name}: {e}")
+
         # update zone/group to a disconnected but not off state
         # this allows it to be configured from HA without forcing a specific connection 
         no_source_update = ZoneUpdate(source_id=-1)
@@ -94,6 +120,8 @@ class AmpliPiZone(AmpliPiMediaPlayer):
 
     async def async_turn_off(self):
         # update zone/group to have a disconnected source state that indicates to HA that the zone/group is off
+        if self._stream is not None:
+            self._last_stream_id = self._stream.id
         source_off_update = ZoneUpdate(source_id=-2)
         if self._group is not None:
             _LOGGER.info(f"Turning group {self.name} off")
@@ -232,6 +260,7 @@ class AmpliPiZone(AmpliPiMediaPlayer):
             self._last_update_successful = True
             self._enabled = enabled
             self._source = None
+            self._stream = None
 
             # When a zone is off it connects to source_id -2, groups also yield the source_id that all requisite zones are already connected to
             if self._group is not None:
@@ -325,17 +354,62 @@ class AmpliPiZone(AmpliPiMediaPlayer):
     async def _update_group(self, update: MultiZoneUpdate):
         await self._data_client.set_zones(update)
 
+    @staticmethod
+    def _stream_label(stream: Stream) -> str:
+        return stream.friendly_name if stream.friendly_name not in [None, 'None'] else stream.original_name
+
     @property
     def source_list(self):
-        """List of available input sources."""
-        return self._attr_source_list
+        """The streams a zone can play. Picking one routes it to a source automatically"""
+        streams = self._streams or []
+        return ['None'] + [self._stream_label(s) for s in streams if not getattr(s, "disabled", False)]
 
     @property
     def source(self):
-        """Returns the current source playing, if this is wrong it won't show up as the selected source on HomeAssistant"""
-        if self._source in [None, "None"]:
-            return "None"
-        return f'Source {self._source.id + 1}'
+        """Returns the stream playing, if this is wrong it won't show up as the selected source on HomeAssistant"""
+        if self._stream is not None:
+            return self._stream_label(self._stream)
+        return "None"
+
+    @property
+    def group_members(self) -> Optional[List[str]]:
+        """Zones sharing this zone's source, and so hearing the same stream. Leader (this zone) first"""
+        state = self._data_client.data
+        if self._group is not None or self._zone is None or state is None:
+            return None
+        if self._zone.source_id is None or self._zone.source_id < 0:
+            return [self.entity_id]
+        others = [z.entity_id for z in routing.listening_zones(state, self._zone.source_id) if z.id != self._zone.id]
+        return [self.entity_id] + others
+
+    async def async_join_players(self, group_members: List[str]):
+        """Point the given zones and groups at this entity's source so they hear the same stream"""
+        state = self._data_client.data
+        bus_id = self._group.source_id if self._group is not None else self._zone.source_id
+        if bus_id is None or bus_id < 0:
+            raise HomeAssistantError(f"{self.name} isn't playing anything to join")
+
+        zones = [z.id for z in state.zones if z.entity_id in group_members]
+        groups = [g.id for g in state.groups if g.entity_id in group_members]
+        if zones or groups:
+            await self._data_client.set_zones(
+                MultiZoneUpdate(
+                    zones=zones or None,
+                    groups=groups or None,
+                    update=ZoneUpdate(source_id=bus_id)
+                )
+            )
+
+    async def async_unjoin_player(self):
+        """Disconnect from the shared source. The source is freed if nothing else listens to it"""
+        zones, groups = self._zone_args()
+        await self._data_client.set_zones(
+            MultiZoneUpdate(
+                zones=zones,
+                groups=groups,
+                update=ZoneUpdate(source_id=-1)
+            )
+        )
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
         """Implement the websocket media browsing helper."""
@@ -353,15 +427,14 @@ class AmpliPiZone(AmpliPiMediaPlayer):
             media_id = play_item.url
             _LOGGER.info(f'Playing media source: {play_item} {media_id}')
 
-        # No source, see if we can find an empty one
+        # No source, see if we can find an empty one and point this zone at it
         if self._source is None:
-            sources = await self._data_client.get_sources()
-            for source in sources:
-                if source is not None and source.input in ['', 'None', None]:
-                    self._source = source
+            self._source = await self.find_source()
             
             if self._source is None:
                 raise Exception("Not attached to a source and all sources are in use. Clear out a source or select an already existing one and try again.")
+
+            await self.async_connect_zones_to_source(self._source, *self._zone_args())
                 
 
         media_id = async_process_play_media_url(self.hass, media_id)
@@ -382,12 +455,14 @@ class AmpliPiZone(AmpliPiMediaPlayer):
                 "amplipi_zones": self._get_zone_ids(),
                 "is_group": True,
                 "stream_connected": self._stream is not None,
+                "last_stream_id": self._last_stream_id,
             }
         else:
             return {
                 "stream_connected": self._stream is not None,
                 "is_group": False,
                 "amplipi_zone_id": self._zone.id,
+                "last_stream_id": self._last_stream_id,
             }
 
     def _get_zone_ids(self) -> List[int]:

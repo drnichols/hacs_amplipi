@@ -37,6 +37,21 @@ The AmpliPi Media Player entities support:
 - On
 - PA
 
+## How playback works
+Each zone and group is a media player, and its source list shows your streams (Spotify, AirPlay, Input 1…). Pick a stream and the integration finds one of AmpliPi's 4 sources (buses) for it automatically:
+- If the stream is already playing somewhere, the zone joins that source.
+- Otherwise it takes a free source. A source that zones are listening to is never taken over; if none is free you get a notification instead.
+- RCA Input N can only ever play on source N. If another stream is using source N, it moves to a free source with its zones. If no source is free, the RCA takes source N and the zones that were listening to the other stream are disconnected, with a notification saying which.
+
+Zones can also be joined with Home Assistant's `media_player.join`, which points them at the leader's source. Turning a zone off and on again resumes the stream it was playing.
+
+## Options
+Open **Settings → Devices & services → AmpliPi → Configure** to change:
+- **Reserve buses for RCA inputs**: sources kept for their RCA input. Other streams only borrow a reserved source when every other source is in use and the reserved one is empty.
+- **Free a bus once no zone is listening to it**: clears a source as soon as its last zone leaves through Home Assistant, so the source is available again. Sources set up outside Home Assistant (such as in the AmpliPi web app) are only cleared after sitting unlistened for the grace period.
+- **Grace period**: how long, in seconds, a source set up outside Home Assistant can sit unlistened before it's freed.
+- **Show bus and stream media players**: also creates the Source 1–4 and per-stream media players. This is on for installs that existed before this option was added, and off for new ones. The Start Streaming blueprint below needs it turned on.
+
 ## Optional Setup
 This component has an optional companion component that can be found at https://github.com/micro-nova/AmpliPi-HomeAssistant-Card if you wish to use home assistant as a ui for your AmpliPi software. You can install that by first installing the [MiniMediaPlayer](https://github.com/kalkih/mini-media-player) component which can be found by searching for it in the HACS searchbar, and then following the same installation guide as this component but replacing the repository link with https://github.com/micro-nova/AmpliPi-HomeAssistant-Card and with type "Dashboard"
 

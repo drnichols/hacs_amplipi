@@ -1,0 +1,5 @@
+pytest-homeassistant-custom-component>=0.13.190
+homeassistant>=2024.12
+pyamplipi==0.4.12
+validators
+zeroconf

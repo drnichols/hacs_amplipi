@@ -5,7 +5,7 @@ from homeassistant.const import CONF_NAME
 
 from .coordinator import AmpliPiDataClient
 from .const import (
-    DOMAIN, AMPLIPI_OBJECT, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, )
+    DOMAIN, AMPLIPI_OBJECT, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_SHOW_BUS_STREAM_ENTITIES, )
 
 from .media_players.base import AmpliPiMediaPlayer
 from .media_players.source import AmpliPiSource
@@ -44,5 +44,10 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     announcer: list[MediaPlayerEntity] = [
         AmpliPiAnnouncer(DOMAIN, vendor, version, image_base_path, amplipi_coordinator)
     ]
+
+    # Zones and groups are the main entities. The bus (source) and stream players are optional, for existing automations and the start_streaming blueprint
+    if not config_entry.options.get(CONF_SHOW_BUS_STREAM_ENTITIES, False):
+        sources = []
+        streams = []
 
     async_add_entities(sources + zones + groups + streams + announcer)

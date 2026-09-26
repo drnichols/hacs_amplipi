@@ -8,7 +8,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import logging
 from .coordinator import AmpliPiDataClient
 
-from .const import DOMAIN, AMPLIPI_OBJECT, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_API_PATH
+from .const import DOMAIN, AMPLIPI_OBJECT, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_API_PATH, CONF_SHOW_BUS_STREAM_ENTITIES
 
 PLATFORMS = ["media_player"]
 
@@ -37,7 +37,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
+    return True
+
+
+async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload when the options change, so entities are rebuilt with the new settings."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate entries created before options existed."""
+    if entry.version == 1 and entry.minor_version < 2:
+        # Existing installs keep their bus and stream entities so automations and dashboards don't break
+        options = {CONF_SHOW_BUS_STREAM_ENTITIES: True, **entry.options}
+        hass.config_entries.async_update_entry(entry, options=options, minor_version=2)
+        _LOGGER.info("Migrated AmpliPi config entry to version 1.2")
     return True
 
 
