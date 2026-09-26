@@ -26,8 +26,8 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
             logger,
             config_entry=config_entry,
             name="hacs_amplipi",
-            update_interval=timedelta(seconds=2),
-            always_update=True
+            update_interval=timedelta(seconds=30),
+            always_update=False
         )
 
         AmpliPi.__init__(
