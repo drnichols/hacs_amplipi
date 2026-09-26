@@ -79,6 +79,7 @@ class AmpliPiStream(AmpliPiMediaPlayer):
                 await self.async_connect_stream_to_source(self._stream, goal_source)
 
         self._is_off = False
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         try:
@@ -102,6 +103,7 @@ class AmpliPiStream(AmpliPiMediaPlayer):
             _LOGGER.debug(f"{self._name} had trouble disconnecting from a source")
         finally:
             self._is_off = True
+            self.async_write_ha_state()
             
 
     async def async_mute_volume(self, mute):
@@ -134,7 +136,7 @@ class AmpliPiStream(AmpliPiMediaPlayer):
 
     def sync_state(self):
         """Retrieve latest state."""
-        _LOGGER.info(f'Retrieving state for stream {self._id}')
+        _LOGGER.debug(f'Retrieving state for stream {self._id}')
         state = self._data_client.data
         if state is not None:
             groups = []
@@ -149,14 +151,14 @@ class AmpliPiStream(AmpliPiMediaPlayer):
                         zones = [zone for zone in state.zones if zone.source_id == current_source.id]
                 else:
                     self._last_update_successful = False
+                    self._available = False
                     return
             except Exception as e:
                 self._last_update_successful = False
                 _LOGGER.error(f'Could not update stream {self._id} due to error: {e}')
                 return
 
-            self._available = self._stream is not None
-
+            self._available = True
             self._stream = stream
             self._sources = state.sources
             self._source = current_source
@@ -169,9 +171,7 @@ class AmpliPiStream(AmpliPiMediaPlayer):
 
     @property
     def state(self):
-        """Update local states and return the media player state of the stream."""
-        self.sync_state()
-
+        """Media player state of the stream."""
         if self._is_off and self._source is None:
             return STATE_OFF
         elif self._last_update_successful is False:
@@ -244,8 +244,3 @@ class AmpliPiStream(AmpliPiMediaPlayer):
     @property
     def extra_state_attributes(self):
         return {"stream_type" : self._stream.type}
-
-    async def _update_available(self):
-        if self._stream is None:
-            return False
-        return True

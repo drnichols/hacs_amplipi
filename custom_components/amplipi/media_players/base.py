@@ -307,15 +307,21 @@ class AmpliPiMediaPlayer(MediaPlayerEntity, CoordinatorEntity):
         if self._stream is not None:
             await self._data_client.next_stream(self._stream.id)
 
+    def sync_state(self):
+        """Refresh the entity's cached state from the coordinator's data. Overridden by each entity type"""
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self.sync_state()
+
+    def _handle_coordinator_update(self):
+        self.sync_state()
+        super()._handle_coordinator_update()
+
     @property
     def available(self):
-        """Is the entity able to be used by the user? Should always return True so long as the entity is loaded."""
-        return self._available
-    
-    @property
-    def should_poll(self):
-        """Polling needed."""
-        return True
+        """Available while the controller is reachable and the AmpliPi-side object is usable"""
+        return self.coordinator.last_update_success and self._available
     
     @property
     def entity_registry_enabled_default(self):

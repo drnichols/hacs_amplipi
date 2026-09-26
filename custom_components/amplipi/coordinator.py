@@ -241,7 +241,7 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
 
     @intercept_and_consume
     async def next_stream(self, stream_id: int) -> Status:
-        return await super().previous_stream(stream_id)
+        return await super().next_stream(stream_id)
 
     @intercept_and_consume
     async def stop_stream(self, stream_id: int) -> Status:

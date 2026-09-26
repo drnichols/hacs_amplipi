@@ -303,3 +303,48 @@ async def test_switching_stream_reuses_own_bus_when_all_busy(hass, amplipi, cont
     await select(hass, "media_player.amplipi_zone_2", "DLNA")
     assert controller.zone_source(2) == 2
     assert controller.bus_input(2) == "stream=1004"
+
+
+async def test_next_track_calls_next_not_previous(hass, amplipi, controller):
+    entry = await amplipi()
+    coordinator = hass.data[DOMAIN][entry.entry_id][AMPLIPI_OBJECT]
+    with patch.object(AmpliPi, "next_stream", create=True, return_value=controller.status()) as nxt, \
+            patch.object(AmpliPi, "previous_stream", create=True, return_value=controller.status()) as prev:
+        await coordinator.next_stream(1000)
+    nxt.assert_called_once_with(1000)
+    prev.assert_not_called()
+
+
+async def test_disabled_zone_and_group_become_unavailable(hass, amplipi, controller):
+    entry = await amplipi()
+    assert hass.states.get("media_player.amplipi_zone_0").state != "unavailable"
+    controller.state["zones"][0]["disabled"] = True
+    for zone_id in (4, 5):
+        controller.state["zones"][zone_id]["disabled"] = True
+    await refresh(hass, entry)
+    assert hass.states.get("media_player.amplipi_zone_0").state == "unavailable"
+    assert hass.states.get("media_player.amplipi_group_100").state == "unavailable"
+    assert hass.states.get("media_player.amplipi_zone_1").state != "unavailable"
+
+
+async def test_entities_follow_coordinator_without_polling(hass, amplipi, controller):
+    entry = await amplipi()
+    assert hass.states.get("media_player.amplipi_zone_0").attributes["source"] == "None"
+    controller.put(1, "stream=1001")
+    controller.point([0], 1)
+    await refresh(hass, entry)
+    assert hass.states.get("media_player.amplipi_zone_0").attributes["source"] == "AirPlay"
+
+
+async def test_coordinator_entities_do_not_poll(hass, amplipi, controller):
+    await amplipi()
+    entity_component = hass.data["entity_components"]["media_player"]
+    assert all(not e.should_poll for e in entity_component.entities)
+
+
+async def test_source_turn_off_and_on_updates_state(hass, amplipi, controller):
+    await amplipi(options={CONF_SHOW_BUS_STREAM_ENTITIES: True})
+    await hass.services.async_call("media_player", "turn_off", {"entity_id": "media_player.amplipi_source_0"}, blocking=True)
+    assert hass.states.get("media_player.amplipi_source_0").state == "off"
+    await hass.services.async_call("media_player", "turn_on", {"entity_id": "media_player.amplipi_source_0"}, blocking=True)
+    assert hass.states.get("media_player.amplipi_source_0").state != "off"

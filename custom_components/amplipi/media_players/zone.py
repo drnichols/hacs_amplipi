@@ -210,7 +210,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
 
     def sync_state(self):
         """Retrieve latest state."""
-        _LOGGER.info(f'Retrieving state for source {self._id}')
+        _LOGGER.debug(f'Retrieving state for source {self._id}')
         state = self._data_client.data
         if state is not None:
             zone = None
@@ -243,15 +243,10 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
                 return
 
 
-            if self._group is not None:
-                for zone_id in self._group.zones:
-                    for state_zone in state.zones:
-                        if state_zone.id == zone_id and not state_zone.disabled:
-                            self._available = True
-                self._available = False
-            elif self._zone is None or self._zone.disabled:
-                self._available = False
-            self._available = True
+            if group is not None:
+                self._available = any(z.id in group.zones and not z.disabled for z in state.zones)
+            else:
+                self._available = not zone.disabled
 
             self._zone = zone
             self._group = group
@@ -280,8 +275,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
 
     @property
     def state(self):
-        """Update local states and return the media player state of the zone or group."""
-        self.sync_state()
+        """Media player state of the zone or group."""
         
         if self._is_off and self._source is None:
             return STATE_OFF
@@ -477,15 +471,3 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
             return zone_ids
         else:
             return self._zone.id
-
-    async def _update_available(self):
-        state = self._data_client.data
-        if self._group is not None:
-            for zone_id in self._group.zones:
-                for state_zone in state.zones:
-                    if state_zone.id == zone_id and not state_zone.disabled:
-                        return True
-            return False
-        elif self._zone is None or self._zone.disabled:
-            return False
-        return True

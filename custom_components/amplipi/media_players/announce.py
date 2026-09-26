@@ -25,10 +25,7 @@ SUPPORT_AMPLIPI_ANNOUNCE = (
 
 class AmpliPiAnnouncer(MediaPlayerEntity):
     # Doesn't need to extend AmpliPiMediaPlayer due to being far simpler than those components
-    @property
-    def should_poll(self):
-        """Polling needed."""
-        return True
+    _attr_should_poll = False
 
     def __init__(self, namespace: str,
                  vendor: str, version: str, image_base_path: str,

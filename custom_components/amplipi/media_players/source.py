@@ -52,6 +52,7 @@ class AmpliPiSource(AmpliPiMediaPlayer):
         # Flipping the value of _is_off only effects what "@property state" later on outputs
         _LOGGER.info(f"Turning source {self._name} on")
         self._is_off = False
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         if self._source is not None:
@@ -72,6 +73,7 @@ class AmpliPiSource(AmpliPiMediaPlayer):
                 )
             )
             self._is_off = True
+            self.async_write_ha_state()
 
     async def async_mute_volume(self, mute):
         if mute is None:
@@ -188,7 +190,7 @@ class AmpliPiSource(AmpliPiMediaPlayer):
 
     def sync_state(self):
         """Retrieve latest state."""
-        _LOGGER.info(f'Retrieving state for source {self._source.id}')
+        _LOGGER.debug(f'Retrieving state for source {self._source.id}')
         state = self._data_client.data
         if state is not None:
             try:
@@ -218,8 +220,7 @@ class AmpliPiSource(AmpliPiMediaPlayer):
 
     @property
     def state(self):
-        """Update local states and return the media player state of the source."""
-        self.sync_state()
+        """Media player state of the source."""
         
         if self._is_off and self._stream is None:
             return STATE_OFF
