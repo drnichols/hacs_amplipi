@@ -118,6 +118,8 @@ class AmpliPiAnnouncer(MediaPlayerEntity):
         if volume is None:
             return
         self._volume = volume
+        # Volume is only held locally and the entity isn't polled, so publish the change straight away
+        self.async_write_ha_state()
 
     async def async_select_source(self, source: Optional[str] = None):
         if source in [None, "None"]:
