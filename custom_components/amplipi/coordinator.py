@@ -2,8 +2,9 @@
     AmpliPi API data coordinator
     Used to synchronize the current AmpliPi state with all of the corresponding HA Entities
 """
+import time
 from datetime import timedelta
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Callable, Iterable, Set
 from packaging.version import Version
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -14,7 +15,11 @@ from pyamplipi.amplipi import AmpliPi
 from pyamplipi.models import SourceUpdate, ZoneUpdate, MultiZoneUpdate, GroupUpdate, PlayMedia, Announcement, Status as PyStatus, Source as PySource, Stream as PyStream, Group as PyGroup, Zone as PyZone, Status as PyStatus
 
 from .models import Status, Source, Zone, Group, Stream
-from .const import DOMAIN
+from .const import (
+    DOMAIN, CONF_RESERVED_RCA, CONF_FREE_IDLE_BUSES, CONF_IDLE_GRACE_SECONDS,
+    DEFAULT_FREE_IDLE_BUSES, DEFAULT_IDLE_GRACE_SECONDS,
+)
+from . import routing
 
 class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
     def __init__(self, hass, logger, config_entry, endpoint, timeout, http_session):
@@ -34,7 +39,52 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
             http_session=http_session
         )
 
-        
+        # When each bus was first seen with a stream on it but no zone listening, for the poll sweep
+        self._idle_since: dict[int, float] = {}
+        self._sweep_task = None
+        # /api/announce borrows a bus while it plays, so buses are left alone until it finishes
+        self._announcing = False
+
+    @property
+    def reserved_buses(self) -> Set[int]:
+        """Buses kept for their RCA input, only lent to other streams once every other bus is in use"""
+        return {int(bus) for bus in self.config_entry.options.get(CONF_RESERVED_RCA, [])}
+
+    @property
+    def free_idle_buses(self) -> bool:
+        """Should a bus be cleared once no zone listens to it"""
+        return self.config_entry.options.get(CONF_FREE_IDLE_BUSES, DEFAULT_FREE_IDLE_BUSES)
+
+    @property
+    def idle_grace_seconds(self) -> int:
+        """How long a bus can sit unlistened before the poll sweep clears it"""
+        return self.config_entry.options.get(CONF_IDLE_GRACE_SECONDS, DEFAULT_IDLE_GRACE_SECONDS)
+
+    async def release_buses(self, bus_ids: Iterable[int]):
+        """Clear the input of each bus that still has a stream but no zone listening, so it counts as available"""
+        if not self.free_idle_buses or self._announcing or self.data is None:
+            return
+        idle = routing.idle_buses(self.data)
+        for bus_id in sorted(set(bus_ids) & idle):
+            self.logger.info(f"Freeing source {bus_id + 1}, no zone is listening to it")
+            self._idle_since.pop(bus_id, None)
+            await self.set_source(bus_id, SourceUpdate(input='None'))
+
+    def _sweep_idle_buses(self, status: Status):
+        """
+            Track buses that have a stream but no listener, and free any that stay that way for the grace period\n
+            This catches changes made outside Home Assistant, such as in the AmpliPi web app, without undoing them straight away
+        """
+        if not self.free_idle_buses or self._announcing:
+            self._idle_since.clear()
+            return
+        now = time.monotonic()
+        idle = routing.idle_buses(status)
+        self._idle_since = {bus: self._idle_since.get(bus, now) for bus in idle}
+        expired = [bus for bus, since in self._idle_since.items() if now - since >= self.idle_grace_seconds]
+        if expired and (self._sweep_task is None or self._sweep_task.done()):
+            self._sweep_task = self.hass.async_create_task(self.release_buses(expired))
+
     def get_entry_by_value(self, value: str) -> Union[Source, Zone, Group, Stream, None]:
         """Find what dict within the state array has a given value and return said dict"""
         if self.data is not None:
@@ -112,6 +162,7 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
 
             status = Status(**state)
             self.async_set_updated_data(status)
+            self._sweep_idle_buses(status)
             return status
 
         except Exception as e:
@@ -126,6 +177,17 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
             return await self.set_data(resp.dict())
         return wrapper
 
+    def release_abandoned_buses(func: Callable):
+        """Free any bus that had a zone listening before the call and has none after it"""
+        async def wrapper(self, *args, **kwargs):
+            before = routing.listened_buses(self.data) if self.data is not None else set()
+            status = await func(self, *args, **kwargs)
+            abandoned = before - routing.listened_buses(status)
+            if abandoned:
+                await self.release_buses(abandoned)
+            return self.data
+        return wrapper
+
     @intercept_and_consume
     async def get_status(self) -> Status:
         return await super().get_status()
@@ -134,10 +196,12 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
     async def set_source(self, source_id: int, source_update: SourceUpdate) -> Status:
         return await super().set_source(source_id, source_update)
         
+    @release_abandoned_buses
     @intercept_and_consume
     async def set_zone(self, zone_id: int, zone_update: ZoneUpdate) -> Status:
         return await super().set_zone(zone_id, zone_update)
 
+    @release_abandoned_buses
     @intercept_and_consume
     async def set_zones(self, zone_update: MultiZoneUpdate) -> Status:
         return await super().set_zones(zone_update)
@@ -146,12 +210,21 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
     async def play_media(self, media: PlayMedia) -> Status:
         return await super().play_media(media)
 
+    @release_abandoned_buses
     @intercept_and_consume
     async def set_group(self, group_id, update: GroupUpdate) -> Status:
         return await super().set_group(group_id, update)
 
-    @intercept_and_consume
     async def announce(self, announcement: Announcement, timeout: Optional[int] = None) -> Status:
+        self._announcing = True
+        try:
+            return await self._announce(announcement, timeout)
+        finally:
+            self._announcing = False
+            self._idle_since.clear()
+
+    @intercept_and_consume
+    async def _announce(self, announcement: Announcement, timeout: Optional[int] = None) -> Status:
         return await super().announce(announcement, timeout)
 
     @intercept_and_consume

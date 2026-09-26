@@ -9,5 +9,19 @@
       "single_instance_allowed": "[%key:common::config_flow::abort::single_instance_allowed%]",
       "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AmpliPi options",
+        "description": "AmpliPi has 4 buses, so at most 4 things can play at once. RCA Input N can only ever play on bus N.",
+        "data": {
+          "reserved_rca_inputs": "Reserve buses for these RCA inputs (other streams only borrow them when every other bus is in use)",
+          "free_idle_buses": "Free a bus once no zone is listening to it",
+          "idle_grace_seconds": "Seconds a bus can sit unlistened before it is freed (changes made outside Home Assistant)",
+          "show_bus_stream_entities": "Show bus (Source 1-4) and stream media players"
+        }
+      }
+    }
   }
 }

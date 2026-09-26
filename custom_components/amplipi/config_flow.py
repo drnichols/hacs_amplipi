@@ -13,10 +13,15 @@ from homeassistant.components import zeroconf
 from homeassistant.const import CONF_ID, CONF_NAME, CONF_PORT, CONF_HOST
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.typing import DiscoveryInfoType
 from pyamplipi.amplipi import AmpliPi
 
-from .const import DOMAIN, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_API_PATH
+from .const import (
+    DOMAIN, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_API_PATH,
+    CONF_RESERVED_RCA, CONF_FREE_IDLE_BUSES, CONF_IDLE_GRACE_SECONDS, CONF_SHOW_BUS_STREAM_ENTITIES,
+    DEFAULT_FREE_IDLE_BUSES, DEFAULT_IDLE_GRACE_SECONDS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +53,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for AmpliPi."""
 
     VERSION = 1
+    # Minor version 2 added options. Entries from before that are migrated in __init__.async_migrate_entry
+    MINOR_VERSION = 2
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return OptionsFlowHandler()
 
     def __init__(self):
         """Initialize flow."""
@@ -75,6 +87,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_WEBAPP: self._webapp_url,
                 CONF_API_PATH: self._api_path,
             },
+            # New installs are zone-centric, so the bus and stream entities start hidden
+            options={CONF_SHOW_BUS_STREAM_ENTITIES: False},
         )
 
     async def _set_uid_and_abort(self):
@@ -201,6 +215,41 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_VERSION: self._version
             }
         )
+
+
+class OptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle AmpliPi options: bus allocation and which entities to create."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> data_entry_flow.FlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = self.config_entry.options
+        # Keys are bus ids as strings; RCA input N can only ever play on bus N
+        rca_inputs = {str(bus): f"Input {bus + 1}" for bus in range(4)}
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_RESERVED_RCA,
+                    default=options.get(CONF_RESERVED_RCA, []),
+                ): cv.multi_select(rca_inputs),
+                vol.Optional(
+                    CONF_FREE_IDLE_BUSES,
+                    default=options.get(CONF_FREE_IDLE_BUSES, DEFAULT_FREE_IDLE_BUSES),
+                ): bool,
+                vol.Optional(
+                    CONF_IDLE_GRACE_SECONDS,
+                    default=options.get(CONF_IDLE_GRACE_SECONDS, DEFAULT_IDLE_GRACE_SECONDS),
+                ): vol.All(vol.Coerce(int), vol.Range(min=5, max=600)),
+                vol.Optional(
+                    CONF_SHOW_BUS_STREAM_ENTITIES,
+                    default=options.get(CONF_SHOW_BUS_STREAM_ENTITIES, False),
+                ): bool,
+            }
+        )
+
+        return self.async_show_form(step_id="init", data_schema=schema)
 
 
 class CannotConnect(exceptions.HomeAssistantError):
