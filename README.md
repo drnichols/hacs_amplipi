@@ -3,14 +3,14 @@
 This component adds support for auto-discovery and configuration of
 AmpliPi Groups and Zones.
 
-If you like this component, please give it a star on [github](https://github.com/micro-nova/hacs_amplipi).
+If you like this component, please give it a star on [github](https://github.com/drnichols/hacs_amplipi).
 
 ## Installation
 
 1. Ensure that [HACS](https://hacs.xyz) is installed.
 1. Navigate to HACS on the sidebar and open the HACS settings by selecting the three dots icon. From there select "custom repositories".
 ![Step 2](doc_img/customrepo.png)
-1. A dialog box should appear. In it, paste a link to to this repo, found at `https://github.com/micro-nova/hacs_amplipi`, under "Repository." Under "Category," select "Integration." Then click "Add."
+1. A dialog box should appear. In it, paste a link to to this repo, found at `https://github.com/drnichols/hacs_amplipi`, under "Repository." Under "Category," select "Integration." Then click "Add."
 ![Step 3](doc_img/add.png)
 1. This will add the AmpliPi repository to your version of the HACS store! Search for it in the search bar and then click on it when it pops up.
 ![Step 4](doc_img/store.png)
@@ -58,7 +58,7 @@ This component has an optional companion component that can be found at https://
 ## Example Automations
 <!-- Blueprint download links made with https://my.home-assistant.io/create-link/?redirect=blueprint_import -->
 ### Start Streaming
-This integration is for a whole-home audio system, in most cases you're likely to just want to play some music to some number of zones or groups at a specified volume. Luckily, we have a blueprint that does just that which you can install [here](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmicro-nova%2Fhacs_amplipi%2Fblob%2Fmain%2Fcustom_components%2Famplipi%2Fblueprints%2Fstart_streaming.yaml)
+This integration is for a whole-home audio system, in most cases you're likely to just want to play some music to some number of zones or groups at a specified volume. Luckily, we have a blueprint that does just that which you can install [here](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fdrnichols%2Fhacs_amplipi%2Fblob%2Fmain%2Fcustom_components%2Famplipi%2Fblueprints%2Fstart_streaming.yaml)
 That particular blueprint doesn't provide any triggers, but the opportunites are endless, here's just a few examples: 
 - Play music to a room when a motion detector notices someone is there (or disconnects when there isn't)
 - Connect your TV's audio output to go to the surround sound speakers when you're watching something
@@ -66,7 +66,7 @@ That particular blueprint doesn't provide any triggers, but the opportunites are
 
 ### Make PA Announcements
 You can send a text-to-speech message to the PA system using automations as well, just use the `Text-to-speech (TTS) 'Speak'` automation type with the google translate text to speech entity as a target on the Announce media player entity and type whatever message you'd like
-To simplify this process, we've made a [blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fmicro-nova%2Fhacs_amplipi%2Fblob%2Fmain%2Fcustom_components%2Famplipi%2Fblueprints%2Ftts_announcement.yaml) that pre-populates the two related entities so all you need to do is type a message and decide if it should be cached. Similarly to the Start Streaming blueprint, this blueprint doesn't come with any triggers, though here's a few examples of what you could do:
+To simplify this process, we've made a [blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fdrnichols%2Fhacs_amplipi%2Fblob%2Fmain%2Fcustom_components%2Famplipi%2Fblueprints%2Ftts_announcement.yaml) that pre-populates the two related entities so all you need to do is type a message and decide if it should be cached. Similarly to the Start Streaming blueprint, this blueprint doesn't come with any triggers, though here's a few examples of what you could do:
 - Place a button in the kitchen to be pressed when dinner is ready to let the whole family know with a button trigger
 - Set a time trigger so that you don't lose track of time, such as reminding you to go to bed or do some chore with a time based trigger
 - Use with other integrations to make more specialty announcements, such as warning you when an event is coming up using a calendar event trigger
