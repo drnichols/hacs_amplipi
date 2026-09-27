@@ -201,6 +201,7 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
         self._sweep_paused_buses(status)
         return status
 
+    # TODO: go back to super().get_status() once pyamplipi keeps Stream.disabled: https://github.com/drnichols/pyamplipi/issues/1
     async def _get_raw_status(self) -> dict:
         """GET /api without pyamplipi's models, which drop fields it doesn't know about, such as each stream's disabled flag"""
         return await self._client.get('')
