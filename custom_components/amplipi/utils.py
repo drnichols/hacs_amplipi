@@ -3,6 +3,7 @@ import re
 from typing import Union, Optional
 
 from .models import Source, Stream
+from . import routing
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -13,8 +14,7 @@ def has_fixed_source(stream: Stream) -> bool:
 def get_fixed_source_id(entity: Union[Stream, Source]):
     """Get the id of the source associated with an RCA"""
     if isinstance(entity, Stream):
-        if has_fixed_source(entity):
-            return entity.id - 996
+        return routing.rca_bus(entity)
     elif isinstance(entity, Source):
         return entity.id + 996
 

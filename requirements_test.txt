@@ -1,4 +1,4 @@
 pytest-homeassistant-custom-component>=0.13.190
 homeassistant>=2025.2
-pyamplipi==0.4.12
+pyamplipi@git+https://github.com/drnichols/pyamplipi.git@v0.4.13
 validators

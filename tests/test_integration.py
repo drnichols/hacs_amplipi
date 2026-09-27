@@ -16,7 +16,6 @@ from custom_components.amplipi.const import (
     CONF_RESERVED_RCA, CONF_SHOW_BUS_STREAM_ENTITIES, CONF_IDLE_GRACE_SECONDS,
     CONF_MUTE_ON_PAUSE, CONF_MUTE_DELAY_SECONDS,
 )
-from custom_components.amplipi.coordinator import AmpliPiDataClient
 
 from .conftest import STREAMS
 
@@ -88,10 +87,6 @@ class FakeController:
     async def get_status(self):
         return self.status()
 
-    async def get_raw_status(self):
-        """GET /api as JSON, with the fields pyamplipi's models drop (like a stream's disabled flag) still in it"""
-        return copy.deepcopy(self.state)
-
     async def set_source(self, source_id, update):
         self.source_writes.append((source_id, update.input))
         inp = '' if update.input == 'None' else update.input
@@ -138,7 +133,6 @@ async def setup_amplipi(hass: HomeAssistant, controller: FakeController, options
     entry.add_to_hass(hass)
     patches = [patch.object(AmpliPi, name, getattr(controller, name), create=True)
                for name in ("get_status", "set_source", "set_zone", "set_zones", "play_stream")]
-    patches.append(patch.object(AmpliPiDataClient, "_get_raw_status", controller.get_raw_status))
     # The API is faked, so no real HTTP session (and its DNS resolver thread) is needed
     patches.append(patch("custom_components.amplipi.async_get_clientsession", return_value=MagicMock()))
     for p in patches:
@@ -382,14 +376,12 @@ async def test_unreachable_controller_retries_setup(hass, controller):
     async def unreachable():
         raise TimeoutError
     controller.get_status = unreachable
-    controller.get_raw_status = unreachable
     entry = MockConfigEntry(domain=DOMAIN, version=1, minor_version=2, data={
         CONF_NAME: "AmpliPi", CONF_HOST: "amplipi.local", CONF_PORT: 80, CONF_ID: "test",
         CONF_VENDOR: "micro-nova", CONF_VERSION: "0.4.9", CONF_WEBAPP: "http://amplipi.local", CONF_API_PATH: "/api",
     })
     entry.add_to_hass(hass)
     with patch.object(AmpliPi, "get_status", controller.get_status, create=True), \
-            patch.object(AmpliPiDataClient, "_get_raw_status", controller.get_raw_status), \
             patch("custom_components.amplipi.async_get_clientsession", return_value=MagicMock()):
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -578,7 +570,7 @@ async def test_disabled_streams_left_out_of_source_lists(hass, amplipi, controll
 async def test_disabled_streams_stay_hidden_after_a_command(hass, amplipi, controller):
     disable_streams(controller, 997, 1000)
     await amplipi()
-    # The command's response comes back through pyamplipi, which drops the disabled flag
+    # The flag has to survive command responses as well as polls
     await hass.services.async_call("media_player", "select_source",
                                    {"entity_id": "media_player.amplipi_zone_0", "source": "AirPlay"}, blocking=True)
     sources = hass.states.get("media_player.amplipi_zone_0").attributes["source_list"]
@@ -592,3 +584,20 @@ async def test_reenabled_stream_returns_to_source_list(hass, amplipi, controller
     disable_streams(controller, 1000, disabled=False)
     await refresh(hass, entry)
     assert "Spotify" in hass.states.get("media_player.amplipi_zone_0").attributes["source_list"]
+
+
+async def test_info_from_newer_firmware_loads_and_is_redacted(hass, amplipi, controller):
+    from custom_components.amplipi.diagnostics import async_get_config_entry_diagnostics
+    controller.state["info"] = {
+        "version": "0.4.9", "config_file": "/home/pi/.config/amplipi/house.json", "online": True,
+        "access_key": "s3cret-key", "serial": 123456, "expanders": [234567],
+        "fw": [{"version": "1.9", "git_hash": "abc123", "git_dirty": False}],
+        "stream_types_available": ["spotify", "pandora"], "connected_drives": [],
+        "global_alerts": [{"message": "Update available", "severity": "info"}],
+    }
+    entry = await amplipi()
+    assert entry.state is ConfigEntryState.LOADED
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    for secret in ("s3cret-key", "123456", "234567", "house.json"):
+        assert secret not in str(diag)
+    assert diag["status"]["info"]["global_alerts"][0]["message"] == "Update available"

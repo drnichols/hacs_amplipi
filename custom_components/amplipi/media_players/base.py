@@ -130,8 +130,6 @@ class AmpliPiMediaPlayer(CoordinatorEntity[AmpliPiDataClient], MediaPlayerEntity
 
             state = self._data_client.data
             source = state.sources[get_fixed_source_id(stream)]
-            # It would be cleaner to do the following, but pyamplipi doesn't support RCA stream's index value atm:
-            # source = state.sources[self._stream.index]
             if source.input not in routing.EMPTY_INPUTS and source.input != routing.stream_input(stream.id):
                 await self.reclaim_rca_source(stream, source.id)
 

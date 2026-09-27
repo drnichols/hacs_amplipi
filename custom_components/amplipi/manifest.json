@@ -10,7 +10,7 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/drnichols/hacs_amplipi/issues",
   "loggers": ["pyamplipi"],
-  "requirements": ["pyamplipi==0.4.12", "validators"],
-  "version": "1.1",
+  "requirements": ["pyamplipi@git+https://github.com/drnichols/pyamplipi.git@v0.4.13", "validators"],
+  "version": "1.2",
   "zeroconf": ["_amplipi._tcp.local."]
 }

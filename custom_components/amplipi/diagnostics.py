@@ -11,8 +11,8 @@ from . import AmpliPiConfigEntry
 from .const import CONF_WEBAPP
 
 TO_REDACT = {CONF_HOST, CONF_WEBAPP, "configuration_url"}
-# Stream configs hold credentials for services such as Pandora
-STATUS_TO_REDACT = {"user", "password", "token", "client_id", "config_file"}
+# Stream configs hold credentials for services such as Pandora, and info holds the controller's access key and serial numbers
+STATUS_TO_REDACT = {"user", "password", "token", "client_id", "config_file", "access_key", "serial", "expanders"}
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: AmpliPiConfigEntry) -> dict[str, Any]:
