@@ -546,3 +546,30 @@ async def test_mute_on_pause_off_by_default(hass, amplipi, controller, clock):
     paused_on_bus(controller, 0, 1000, [0])
     await paused_long_enough(hass, amplipi, controller, clock, options={CONF_SHOW_BUS_STREAM_ENTITIES: False})
     assert not controller.muted(0)
+
+
+async def test_info_from_newer_firmware_loads_and_is_redacted(hass, amplipi, controller):
+    from custom_components.amplipi.diagnostics import async_get_config_entry_diagnostics
+    controller.state["info"] = {
+        "version": "0.4.9", "config_file": "/home/pi/.config/amplipi/house.json", "online": True,
+        "access_key": "s3cret-key", "serial": 123456, "expanders": [234567],
+        "fw": [{"version": "1.9", "git_hash": "abc123", "git_dirty": False}],
+        "stream_types_available": ["spotify", "pandora"], "connected_drives": [],
+        "global_alerts": [{"message": "Update available", "severity": "info"}],
+    }
+    entry = await amplipi()
+    assert entry.state is ConfigEntryState.LOADED
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    for secret in ("s3cret-key", "123456", "234567", "house.json"):
+        assert secret not in str(diag)
+    assert diag["status"]["info"]["global_alerts"][0]["message"] == "Update available"
+
+
+async def test_disabled_stream_left_out_of_zone_source_list(hass, amplipi, controller):
+    controller.state["streams"][6]["disabled"] = True  # Radio
+    entry = await amplipi()
+    assert "Radio" not in hass.states.get("media_player.amplipi_zone_0").attributes["source_list"]
+    # Command responses go through pyamplipi too, so the flag survives them as well as polls
+    await select(hass, "media_player.amplipi_zone_0", "Spotify")
+    assert entry.runtime_data.data.streams[6].disabled is True
+    assert "Radio" not in hass.states.get("media_player.amplipi_zone_0").attributes["source_list"]

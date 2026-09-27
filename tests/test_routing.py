@@ -103,3 +103,13 @@ def test_only_streams_with_transport_mute_on_pause(routing, stream):
     assert not routing.mutes_on_pause(Stream(id=1010, name="Music Assistant 1", type="internetradio"))
     assert not routing.mutes_on_pause(Stream(id=1020, name="Aux", type="aux"))
     assert not routing.mutes_on_pause(None)
+
+
+def test_rca_bus_comes_from_its_index(routing):
+    assert routing.rca_bus(Stream(id=997, name="Input 2", type="rca", index=1)) == 1
+
+
+def test_rca_bus_falls_back_to_stream_id_without_index(routing):
+    # Older firmware doesn't report index
+    assert routing.rca_bus(Stream(id=999, name="Input 4", type="rca")) == 3
+    assert routing.rca_bus(Stream(id=1000, name="Spotify", type="spotify", index=0)) is None
