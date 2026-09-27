@@ -55,8 +55,12 @@ def paused_buses(state: Status) -> Set[int]:
 
 
 def rca_bus(stream: Stream) -> Optional[int]:
-    """The only bus an RCA stream can use, or None for any other stream type"""
-    if stream.type == "rca" and stream.id in RCA_STREAM_IDS:
+    """The only bus an RCA stream can use, or None for any other stream type. Older firmware doesn't report the RCA's index, so it's worked out from the stream id"""
+    if stream.type != "rca":
+        return None
+    if stream.index is not None:
+        return stream.index
+    if stream.id in RCA_STREAM_IDS:
         return stream.id - RCA_STREAM_IDS[0]
     return None
 
