@@ -1,4 +1,5 @@
 """Tests for bus allocation"""
+from pyamplipi.models import Stream
 
 
 def test_reuses_bus_already_carrying_stream(routing, status, stream):
@@ -85,3 +86,11 @@ def test_leaving_zone_frees_its_bus_for_reuse(routing, status, stream):
 def test_reserved_bus_lent_to_idle_borrower_can_be_reused(routing, status, stream):
     state = status(['stream=1000', 'stream=1001', 'stream=1002', 'stream=1003'], [0, 1, 2])
     assert routing.pick_bus(state, stream(1004), reserved={3}) == 3
+
+
+def test_music_assistant_streams_recognised(routing):
+    assert routing.is_music_assistant_stream(Stream(id=1010, name="Music Assistant 2", type="internetradio"))
+    # a user's own radio stream with a similar name, and the right name on another stream type
+    assert not routing.is_music_assistant_stream(Stream(id=1011, name="Music Assistant Radio", type="internetradio"))
+    assert not routing.is_music_assistant_stream(Stream(id=1012, name="Music Assistant 1", type="spotify"))
+    assert not routing.is_music_assistant_stream(Stream(id=1002, name="Radio", type="internetradio"))

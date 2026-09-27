@@ -2,6 +2,7 @@
 # pylint: disable=W1203
 from homeassistant.components.media_player import MediaPlayerEntity
 
+from . import routing
 from .coordinator import AmpliPiDataClient
 from .const import DOMAIN, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_SHOW_BUS_STREAM_ENTITIES
 
@@ -31,9 +32,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         AmpliPiZone(DOMAIN, None, group, status.streams, status.sources, vendor, version, image_base_path, amplipi_coordinator)
         for group in status.groups]
     
+    # Music Assistant's streams are driven by Music Assistant, so they don't get a stream player here
     streams: list[AmpliPiMediaPlayer] = [
         AmpliPiStream(DOMAIN, stream, status.sources, vendor, version, image_base_path, amplipi_coordinator)
         for stream in status.streams
+        if not routing.is_music_assistant_stream(stream)
     ]
 
     announcer: list[MediaPlayerEntity] = [

@@ -409,3 +409,15 @@ async def test_diagnostics_redacts_host_and_credentials(hass, amplipi, controlle
     assert len(diag["status"]["zones"]) == 6
     assert "amplipi.local" not in str(diag)
     assert "hunter2" not in str(diag) and "me@example.com" not in str(diag)
+
+
+async def test_music_assistant_stream_hidden_but_shown_as_current_source(hass, amplipi, controller):
+    controller.state["streams"].append({"id": 1010, "name": "Music Assistant 1", "type": "internetradio"})
+    controller.put(1, "stream=1010")
+    controller.point([0], 1)
+    await amplipi(options={CONF_SHOW_BUS_STREAM_ENTITIES: True})
+    state = hass.states.get("media_player.amplipi_zone_0")
+    assert "Music Assistant 1" not in state.attributes["source_list"]
+    assert state.attributes["source"] == "Music Assistant 1"
+    assert hass.states.get("media_player.amplipi_stream_1010") is None
+    assert hass.states.get("media_player.amplipi_stream_1000") is not None

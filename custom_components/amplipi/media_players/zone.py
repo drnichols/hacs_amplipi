@@ -331,9 +331,12 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
 
     @property
     def source_list(self):
-        """The streams a zone can play. Picking one routes it to a source automatically"""
+        """The streams a zone can play. Picking one routes it to a source automatically. Music Assistant's streams are left out, since Music Assistant drives them"""
         streams = self._streams or []
-        return ['None'] + [self._stream_label(s) for s in streams if not getattr(s, "disabled", False)]
+        return ['None'] + [
+            self._stream_label(s) for s in streams
+            if not getattr(s, "disabled", False) and not routing.is_music_assistant_stream(s)
+        ]
 
     @property
     def source(self):
