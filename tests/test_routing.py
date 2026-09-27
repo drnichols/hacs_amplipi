@@ -94,3 +94,12 @@ def test_music_assistant_streams_recognised(routing):
     assert not routing.is_music_assistant_stream(Stream(id=1011, name="Music Assistant Radio", type="internetradio"))
     assert not routing.is_music_assistant_stream(Stream(id=1012, name="Music Assistant 1", type="spotify"))
     assert not routing.is_music_assistant_stream(Stream(id=1002, name="Radio", type="internetradio"))
+
+
+def test_only_streams_with_transport_mute_on_pause(routing, stream):
+    assert routing.mutes_on_pause(stream(1000))
+    assert routing.mutes_on_pause(stream(1002))
+    assert not routing.mutes_on_pause(stream(996))
+    assert not routing.mutes_on_pause(Stream(id=1010, name="Music Assistant 1", type="internetradio"))
+    assert not routing.mutes_on_pause(Stream(id=1020, name="Aux", type="aux"))
+    assert not routing.mutes_on_pause(None)

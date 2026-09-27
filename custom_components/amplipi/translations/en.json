@@ -36,6 +36,8 @@
           "reserved_rca_inputs": "Reserve buses for these RCA inputs (other streams only borrow them when every other bus is in use)",
           "free_idle_buses": "Free a bus once no zone is listening to it",
           "idle_grace_seconds": "Seconds a bus can sit unlistened before it is freed (changes made outside Home Assistant)",
+          "mute_on_pause": "Mute zones while their stream is paused, so the amplifiers can go into standby",
+          "mute_delay_seconds": "Seconds a stream can sit paused before its zones are muted",
           "show_bus_stream_entities": "Show bus (Source 1-4) and stream media players"
         }
       }

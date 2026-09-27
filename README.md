@@ -50,6 +50,9 @@ Open **Settings → Devices & services → AmpliPi → Configure** to change:
 - **Reserve buses for RCA inputs**: sources kept for their RCA input. Other streams only borrow a reserved source when every other source is in use and the reserved one is empty.
 - **Free a bus once no zone is listening to it**: clears a source as soon as its last zone leaves through Home Assistant, so the source is available again. Sources set up outside Home Assistant (such as in the AmpliPi web app) are only cleared after sitting unlistened for the grace period.
 - **Grace period**: how long, in seconds, a source set up outside Home Assistant can sit unlistened before it's freed.
+- **Mute zones while their stream is paused** (off by default): once a stream has been paused or stopped for the mute delay, the zones listening to it are muted. AmpliPi only puts its amplifiers into standby when every zone on the unit is muted, so a paused zone left unmuted keeps them all running. The zones are unmuted when the stream plays again or when you pick another stream for them. Zones you muted yourself stay muted, and a zone you unmute during a pause is left alone. RCA/aux inputs, announcements and Music Assistant's streams are never muted this way.
+  - Playing from Home Assistant unmutes straight away. If the stream is resumed somewhere else, such as Spotify on your phone, Home Assistant only notices on its next check of the AmpliPi, so the zone can stay muted for up to 30 seconds.
+- **Mute delay**: how long, in seconds, a stream can sit paused before its zones are muted.
 - **Show bus and stream media players**: also creates the Source 1–4 and per-stream media players. This is on for installs that existed before this option was added, and off for new ones. The Start Streaming blueprint below needs it turned on.
 
 ## Using with Music Assistant

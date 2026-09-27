@@ -14,6 +14,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.amplipi.const import (
     DOMAIN, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_API_PATH,
     CONF_RESERVED_RCA, CONF_SHOW_BUS_STREAM_ENTITIES, CONF_IDLE_GRACE_SECONDS,
+    CONF_MUTE_ON_PAUSE, CONF_MUTE_DELAY_SECONDS,
 )
 
 from .conftest import STREAMS
@@ -41,6 +42,7 @@ class FakeController:
             "info": {"version": "0.4.9"},
         }
         self.source_writes = []
+        self.fail_set_zones = False
 
     def status(self):
         return Status(**copy.deepcopy(self.state))
@@ -57,6 +59,21 @@ class FakeController:
     def point(self, zone_ids, bus_id):
         for zone_id in zone_ids:
             self.state["zones"][zone_id]["source_id"] = bus_id
+
+    def playback(self, bus_id, state):
+        self.state["sources"][bus_id]["info"]["state"] = state
+
+    def muted(self, zone_id):
+        return self.state["zones"][zone_id]["mute"]
+
+    def set_muted(self, zone_id, muted):
+        self.state["zones"][zone_id]["mute"] = muted
+
+    async def play_stream(self, stream_id):
+        for source in self.state["sources"]:
+            if source["input"] == f"stream={stream_id}":
+                source["info"]["state"] = "playing"
+        return self.status()
 
     def _apply_zone(self, zone_id, update):
         zone = self.state["zones"][zone_id]
@@ -85,6 +102,9 @@ class FakeController:
         return self.status()
 
     async def set_zones(self, update):
+        if self.fail_set_zones:
+            self.fail_set_zones = False
+            raise ConnectionError("AmpliPi didn't answer")
         zone_ids = set(update.zones or [])
         for group in self.state["groups"]:
             if group["id"] in (update.groups or []):
@@ -112,7 +132,7 @@ async def setup_amplipi(hass: HomeAssistant, controller: FakeController, options
     )
     entry.add_to_hass(hass)
     patches = [patch.object(AmpliPi, name, getattr(controller, name), create=True)
-               for name in ("get_status", "set_source", "set_zone", "set_zones")]
+               for name in ("get_status", "set_source", "set_zone", "set_zones", "play_stream")]
     # The API is faked, so no real HTTP session (and its DNS resolver thread) is needed
     patches.append(patch("custom_components.amplipi.async_get_clientsession", return_value=MagicMock()))
     for p in patches:
@@ -421,3 +441,108 @@ async def test_music_assistant_stream_hidden_but_shown_as_current_source(hass, a
     assert state.attributes["source"] == "Music Assistant 1"
     assert hass.states.get("media_player.amplipi_stream_1010") is None
     assert hass.states.get("media_player.amplipi_stream_1000") is not None
+
+
+MUTE_OPTIONS = {CONF_SHOW_BUS_STREAM_ENTITIES: False, CONF_MUTE_ON_PAUSE: True, CONF_MUTE_DELAY_SECONDS: 30}
+
+
+@pytest.fixture
+def clock():
+    """Replace the coordinator's clock only, so Home Assistant's event loop keeps real time"""
+    now = [1000.0]
+    fake_time = MagicMock()
+    fake_time.monotonic = lambda: now[0]
+    with patch("custom_components.amplipi.coordinator.time", fake_time):
+        yield now
+
+
+def paused_on_bus(controller, bus_id, stream_id, zone_ids):
+    """Zones listening, unmuted, to a stream that is paused"""
+    controller.put(bus_id, f"stream={stream_id}")
+    controller.point(zone_ids, bus_id)
+    for zone_id in zone_ids:
+        controller.set_muted(zone_id, False)
+    controller.playback(bus_id, "paused")
+
+
+async def paused_long_enough(hass, amplipi, controller, clock, options=MUTE_OPTIONS):
+    entry = await amplipi(options=options)
+    clock[0] += 31
+    await refresh(hass, entry)
+    return entry
+
+
+async def test_paused_stream_mutes_its_zones_after_the_delay(hass, amplipi, controller, clock):
+    paused_on_bus(controller, 0, 1000, [0, 1])
+    entry = await amplipi(options=MUTE_OPTIONS)
+    clock[0] += 29
+    await refresh(hass, entry)
+    assert not controller.muted(0)
+    clock[0] += 2
+    await refresh(hass, entry)
+    assert controller.muted(0) and controller.muted(1)
+
+
+async def test_playing_again_unmutes_only_auto_muted_zones(hass, amplipi, controller, clock):
+    paused_on_bus(controller, 0, 1000, [0, 1, 2])
+    controller.set_muted(2, True)  # muted by the user before the pause
+    entry = await paused_long_enough(hass, amplipi, controller, clock)
+    assert controller.muted(0) and controller.muted(1)
+    controller.playback(0, "playing")
+    await refresh(hass, entry)
+    assert not controller.muted(0) and not controller.muted(1)
+    assert controller.muted(2)
+
+
+async def test_play_from_home_assistant_unmutes_straight_away(hass, amplipi, controller, clock):
+    paused_on_bus(controller, 0, 1000, [0])
+    entry = await paused_long_enough(hass, amplipi, controller, clock)
+    assert controller.muted(0)
+    await entry.runtime_data.play_stream(1000)
+    await hass.async_block_till_done()
+    assert not controller.muted(0)
+
+
+async def test_zone_unmuted_by_user_during_pause_stays_unmuted(hass, amplipi, controller, clock):
+    paused_on_bus(controller, 0, 1000, [0])
+    entry = await paused_long_enough(hass, amplipi, controller, clock)
+    controller.set_muted(0, False)
+    await refresh(hass, entry)
+    clock[0] += 60
+    await refresh(hass, entry)
+    assert not controller.muted(0)
+
+
+async def test_zone_moved_to_another_stream_is_unmuted(hass, amplipi, controller, clock):
+    paused_on_bus(controller, 0, 1000, [0])
+    await paused_long_enough(hass, amplipi, controller, clock)
+    assert controller.muted(0)
+    await select(hass, "media_player.amplipi_zone_0", "AirPlay")
+    await hass.async_block_till_done()
+    assert controller.zone_source(0) != 0
+    assert not controller.muted(0)
+
+
+async def test_failed_mute_is_retried_on_the_next_poll(hass, amplipi, controller, clock):
+    paused_on_bus(controller, 0, 1000, [0])
+    entry = await amplipi(options=MUTE_OPTIONS)
+    clock[0] += 31
+    controller.fail_set_zones = True
+    await refresh(hass, entry)
+    assert not controller.muted(0)
+    await refresh(hass, entry)
+    assert controller.muted(0)
+
+
+async def test_rca_and_music_assistant_streams_are_never_muted(hass, amplipi, controller, clock):
+    controller.state["streams"].append({"id": 1010, "name": "Music Assistant 1", "type": "internetradio"})
+    paused_on_bus(controller, 0, 996, [0])
+    paused_on_bus(controller, 1, 1010, [1])
+    await paused_long_enough(hass, amplipi, controller, clock)
+    assert not controller.muted(0) and not controller.muted(1)
+
+
+async def test_mute_on_pause_off_by_default(hass, amplipi, controller, clock):
+    paused_on_bus(controller, 0, 1000, [0])
+    await paused_long_enough(hass, amplipi, controller, clock, options={CONF_SHOW_BUS_STREAM_ENTITIES: False})
+    assert not controller.muted(0)

@@ -14,8 +14,8 @@ from pyamplipi.models import SourceUpdate, ZoneUpdate, MultiZoneUpdate, GroupUpd
 
 from .models import Status, Source, Zone, Group, Stream
 from .const import (
-    DOMAIN, CONF_RESERVED_RCA, CONF_FREE_IDLE_BUSES, CONF_IDLE_GRACE_SECONDS,
-    DEFAULT_FREE_IDLE_BUSES, DEFAULT_IDLE_GRACE_SECONDS,
+    DOMAIN, CONF_RESERVED_RCA, CONF_FREE_IDLE_BUSES, CONF_IDLE_GRACE_SECONDS, CONF_MUTE_ON_PAUSE, CONF_MUTE_DELAY_SECONDS,
+    DEFAULT_FREE_IDLE_BUSES, DEFAULT_IDLE_GRACE_SECONDS, DEFAULT_MUTE_ON_PAUSE, DEFAULT_MUTE_DELAY_SECONDS,
 )
 from . import routing
 
@@ -42,6 +42,11 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
         self._sweep_task = None
         # /api/announce borrows a bus while it plays, so buses are left alone until it finishes
         self._announcing = False
+        # When each listened bus was first seen paused, and the zones muted because of it (zone id -> bus id)
+        self._paused_since: dict[int, float] = {}
+        self._auto_muted: dict[int, int] = {}
+        self._mute_exempt: dict[int, int] = {}
+        self._mute_task = None
 
     @property
     def reserved_buses(self) -> Set[int]:
@@ -83,6 +88,89 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
         if expired and (self._sweep_task is None or self._sweep_task.done()):
             self._sweep_task = self.hass.async_create_task(self.release_buses(expired))
 
+    @property
+    def mute_on_pause(self) -> bool:
+        """Should zones be muted while their stream is paused, so the amps can drop into standby"""
+        return self.config_entry.options.get(CONF_MUTE_ON_PAUSE, DEFAULT_MUTE_ON_PAUSE)
+
+    @property
+    def mute_delay_seconds(self) -> int:
+        """How long a stream can sit paused before its zones are muted"""
+        return self.config_entry.options.get(CONF_MUTE_DELAY_SECONDS, DEFAULT_MUTE_DELAY_SECONDS)
+
+    def _sweep_paused_buses(self, status: Status):
+        """
+            Mute the zones on a bus whose stream has been paused for the mute delay, and unmute them once it plays again or they move to another stream\n
+            Only zones muted here are ever unmuted, so a zone the user muted stays muted. A zone the user unmutes, turns off or disconnects is forgotten
+        """
+        if not self.mute_on_pause or self._announcing:
+            return
+        now = time.monotonic()
+        paused = routing.paused_buses(status)
+        self._paused_since = {bus: self._paused_since.get(bus, now) for bus in paused}
+
+        zones = {z.id: z for z in status.zones}
+        # A zone the user unmutes during a pause is left alone until that pause ends or the zone moves
+        self._mute_exempt = {
+            zone_id: bus for zone_id, bus in self._mute_exempt.items()
+            if bus in paused and zone_id in zones and zones[zone_id].source_id == bus
+        }
+        unmute = {}
+        for zone_id, bus in list(self._auto_muted.items()):
+            zone = zones.get(zone_id)
+            if zone is None or zone.disabled or zone.source_id < 0:
+                del self._auto_muted[zone_id]
+            elif not zone.mute:
+                del self._auto_muted[zone_id]
+                if zone.source_id == bus and bus in paused:
+                    self._mute_exempt[zone_id] = bus
+            elif zone.source_id != bus or bus not in paused:
+                unmute[zone_id] = bus
+
+        mute = {}
+        for bus, since in self._paused_since.items():
+            if now - since < self.mute_delay_seconds:
+                continue
+            for zone in routing.listening_zones(status, bus):
+                if not zone.mute and zone.id not in self._auto_muted and zone.id not in self._mute_exempt:
+                    mute[zone.id] = bus
+
+        # While a previous change is still being sent, leave everything for the next sweep
+        if not (mute or unmute) or (self._mute_task is not None and not self._mute_task.done()):
+            return
+        for zone_id in unmute:
+            del self._auto_muted[zone_id]
+        self._auto_muted.update(mute)
+        self._mute_task = self.hass.async_create_task(self._apply_pause_mutes(mute, unmute))
+
+    async def _apply_pause_mutes(self, mute: dict[int, int], unmute: dict[int, int]):
+        """
+            Send the mutes and unmutes the sweep decided on. mute and unmute map zone id -> bus id\n
+            Tracking was updated before sending, so the sweeps these calls trigger see the change. It's undone if a call fails, so the next sweep retries
+        """
+        try:
+            if unmute:
+                self.logger.info(f"Unmuting zones {list(unmute)}, their stream is playing again")
+                await self.set_zones(MultiZoneUpdate(zones=list(unmute), update=ZoneUpdate(mute=False)))
+            if mute:
+                self.logger.info(f"Muting zones {list(mute)}, their stream has been paused for {self.mute_delay_seconds}s")
+                await self.set_zones(MultiZoneUpdate(zones=list(mute), update=ZoneUpdate(mute=True)))
+        except Exception as e:  # pylint: disable=broad-except
+            self.logger.warning(f"Couldn't change mute for zones on a paused stream, will retry: {e}")
+            for zone_id in mute:
+                self._auto_muted.pop(zone_id, None)
+            self._auto_muted.update(unmute)
+
+    async def _unmute_bus(self, bus_id: Optional[int]):
+        """Unmute the zones muted while this bus was paused, straight away rather than on the next poll"""
+        self._paused_since.pop(bus_id, None)
+        self._mute_exempt = {zone_id: bus for zone_id, bus in self._mute_exempt.items() if bus != bus_id}
+        zones = [zone_id for zone_id, bus in self._auto_muted.items() if bus == bus_id]
+        for zone_id in zones:
+            del self._auto_muted[zone_id]
+        if zones:
+            await self.set_zones(MultiZoneUpdate(zones=zones, update=ZoneUpdate(mute=False)))
+
     def get_entry_by_value(self, value: str) -> Union[Source, Zone, Group, Stream, None]:
         """Find what dict within the state array has a given value and return said dict"""
         if self.data is not None:
@@ -110,6 +198,7 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
             raise UpdateFailed(f"Error fetching data: {e}") from e
         status = await self.build_status(resp.model_dump())
         self._sweep_idle_buses(status)
+        self._sweep_paused_buses(status)
         return status
 
     async def set_data(self, state: dict) -> Status:
@@ -117,6 +206,7 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
         status = await self.build_status(state)
         self.async_set_updated_data(status)
         self._sweep_idle_buses(status)
+        self._sweep_paused_buses(status)
         return status
 
     async def build_status(self, state: dict) -> Status:
@@ -222,8 +312,13 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
     async def _announce(self, announcement: Announcement, timeout: Optional[int] = None) -> Status:
         return await super().announce(announcement, timeout)
 
-    @intercept_and_consume
     async def play_stream(self, stream_id: int) -> Status:
+        status = await self._play_stream(stream_id)
+        await self._unmute_bus(routing.bus_for_stream(status, stream_id))
+        return self.data
+
+    @intercept_and_consume
+    async def _play_stream(self, stream_id: int) -> Status:
         return await super().play_stream(stream_id)
 
     @intercept_and_consume
