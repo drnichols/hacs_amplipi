@@ -548,6 +548,44 @@ async def test_mute_on_pause_off_by_default(hass, amplipi, controller, clock):
     assert not controller.muted(0)
 
 
+def disable_streams(controller, *stream_ids, disabled=True):
+    for stream in controller.state["streams"]:
+        if stream["id"] in stream_ids:
+            stream["disabled"] = disabled
+
+
+async def test_disabled_streams_left_out_of_source_lists(hass, amplipi, controller):
+    disable_streams(controller, 997, 1000)  # Input 2 and Spotify
+    await amplipi(options={CONF_SHOW_BUS_STREAM_ENTITIES: True})
+    for entity_id in ("media_player.amplipi_zone_0", "media_player.amplipi_group_100"):
+        sources = hass.states.get(entity_id).attributes["source_list"]
+        assert "Input 2" not in sources and "Spotify" not in sources
+        assert "Input 1" in sources and "AirPlay" in sources
+    # Source 2 is the only bus that could otherwise offer Input 2
+    bus_sources = hass.states.get("media_player.amplipi_source_1").attributes["source_list"]
+    assert "Input 2" not in bus_sources and "Spotify" not in bus_sources
+    assert "AirPlay" in bus_sources
+
+
+async def test_disabled_streams_stay_hidden_after_a_command(hass, amplipi, controller):
+    disable_streams(controller, 997, 1000)
+    await amplipi()
+    # The flag has to survive command responses as well as polls
+    await hass.services.async_call("media_player", "select_source",
+                                   {"entity_id": "media_player.amplipi_zone_0", "source": "AirPlay"}, blocking=True)
+    sources = hass.states.get("media_player.amplipi_zone_0").attributes["source_list"]
+    assert "Input 2" not in sources and "Spotify" not in sources
+
+
+async def test_reenabled_stream_returns_to_source_list(hass, amplipi, controller):
+    disable_streams(controller, 1000)
+    entry = await amplipi()
+    assert "Spotify" not in hass.states.get("media_player.amplipi_zone_0").attributes["source_list"]
+    disable_streams(controller, 1000, disabled=False)
+    await refresh(hass, entry)
+    assert "Spotify" in hass.states.get("media_player.amplipi_zone_0").attributes["source_list"]
+
+
 async def test_info_from_newer_firmware_loads_and_is_redacted(hass, amplipi, controller):
     from custom_components.amplipi.diagnostics import async_get_config_entry_diagnostics
     controller.state["info"] = {
@@ -563,13 +601,3 @@ async def test_info_from_newer_firmware_loads_and_is_redacted(hass, amplipi, con
     for secret in ("s3cret-key", "123456", "234567", "house.json"):
         assert secret not in str(diag)
     assert diag["status"]["info"]["global_alerts"][0]["message"] == "Update available"
-
-
-async def test_disabled_stream_left_out_of_zone_source_list(hass, amplipi, controller):
-    controller.state["streams"][6]["disabled"] = True  # Radio
-    entry = await amplipi()
-    assert "Radio" not in hass.states.get("media_player.amplipi_zone_0").attributes["source_list"]
-    # Command responses go through pyamplipi too, so the flag survives them as well as polls
-    await select(hass, "media_player.amplipi_zone_0", "Spotify")
-    assert entry.runtime_data.data.streams[6].disabled is True
-    assert "Radio" not in hass.states.get("media_player.amplipi_zone_0").attributes["source_list"]

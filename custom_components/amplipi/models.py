@@ -14,7 +14,7 @@ class Source(PySource, AmpliPiHAEntity):
 
 class Stream(PyStream, AmpliPiHAEntity):
     """Digital stream such as Pandora, AirPlay or Spotify\nAlso includes some encoding relating to HomeAssistant, including the original name and unique id of the related entity"""
-    
+
 class Group(PyGroup, AmpliPiHAEntity):
     """A group of zones that can share the same audio input and be controlled as a group ie. Upstairs. Volume, mute,
     and source_id fields are aggregates of the member zones.\nAlso includes some encoding relating to HomeAssistant, including the original name and unique id of the related entity"""
