@@ -19,7 +19,8 @@ from pyamplipi.amplipi import AmpliPi
 from .const import (
     DOMAIN, CONF_VENDOR, CONF_VERSION, CONF_WEBAPP, CONF_API_PATH,
     CONF_RESERVED_RCA, CONF_FREE_IDLE_BUSES, CONF_IDLE_GRACE_SECONDS, CONF_SHOW_BUS_STREAM_ENTITIES,
-    DEFAULT_FREE_IDLE_BUSES, DEFAULT_IDLE_GRACE_SECONDS,
+    CONF_MUTE_ON_PAUSE, CONF_MUTE_DELAY_SECONDS,
+    DEFAULT_FREE_IDLE_BUSES, DEFAULT_IDLE_GRACE_SECONDS, DEFAULT_MUTE_ON_PAUSE, DEFAULT_MUTE_DELAY_SECONDS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -189,6 +190,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_IDLE_GRACE_SECONDS,
                     default=options.get(CONF_IDLE_GRACE_SECONDS, DEFAULT_IDLE_GRACE_SECONDS),
+                ): vol.All(vol.Coerce(int), vol.Range(min=5, max=600)),
+                vol.Optional(
+                    CONF_MUTE_ON_PAUSE,
+                    default=options.get(CONF_MUTE_ON_PAUSE, DEFAULT_MUTE_ON_PAUSE),
+                ): bool,
+                vol.Optional(
+                    CONF_MUTE_DELAY_SECONDS,
+                    default=options.get(CONF_MUTE_DELAY_SECONDS, DEFAULT_MUTE_DELAY_SECONDS),
                 ): vol.All(vol.Coerce(int), vol.Range(min=5, max=600)),
                 vol.Optional(
                     CONF_SHOW_BUS_STREAM_ENTITIES,

@@ -33,6 +33,27 @@ def stream_input(stream_id: int) -> str:
     return f"stream={stream_id}"
 
 
+# Pass-through inputs always report "stopped", and announcements restore their own mutes, so their state says nothing about whether audio is paused
+NO_TRANSPORT_STREAM_TYPES = ("rca", "aux", "fileplayer")
+PAUSED_STATES = ("paused", "stopped")
+
+
+def mutes_on_pause(stream: Optional[Stream]) -> bool:
+    """Does this stream's paused/stopped state mean its zones are silent. Music Assistant's streams are left to Music Assistant, whose stream state is unreliable"""
+    return stream is not None and stream.type not in NO_TRANSPORT_STREAM_TYPES and not is_music_assistant_stream(stream)
+
+
+def paused_buses(state: Status) -> Set[int]:
+    """Buses with zones listening whose stream is paused or stopped"""
+    paused = set()
+    for source in state.sources:
+        if source.info is None or source.info.state not in PAUSED_STATES or not listening_zones(state, source.id):
+            continue
+        if mutes_on_pause(stream_on_bus(state, source.id)):
+            paused.add(source.id)
+    return paused
+
+
 def rca_bus(stream: Stream) -> Optional[int]:
     """The only bus an RCA stream can use, or None for any other stream type"""
     if stream.type == "rca" and stream.id in RCA_STREAM_IDS:
