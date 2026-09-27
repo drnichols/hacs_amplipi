@@ -99,7 +99,7 @@ class AmpliPiMediaPlayer(CoordinatorEntity[AmpliPiDataClient], MediaPlayerEntity
         self._extra_attributes = {}
 
     def available_streams(self, source: Source):
-        """Returns the available streams (generally all of them minus three of the four RCAs) relative to the provided source"""
+        """Returns the available streams (generally all of them minus three of the four RCAs, and any disabled on the AmpliPi) relative to the provided source"""
         streams: List[str] = ['None']
         if self._data_client.data is not None:
             # Excludes every RCA except for the one related to the given source
@@ -109,6 +109,8 @@ class AmpliPiMediaPlayer(CoordinatorEntity[AmpliPiDataClient], MediaPlayerEntity
             if stream_entries:
                 for entry in stream_entries:
                     amplipi_id = extract_amplipi_id_from_unique_id(entry.unique_id)
+                    if entry.disabled:
+                        continue
                     if amplipi_id == rca_selectable or amplipi_id not in RCAs:
                         streams.append(entry.friendly_name if entry.friendly_name not in [None, 'None'] else entry.original_name)
         return streams

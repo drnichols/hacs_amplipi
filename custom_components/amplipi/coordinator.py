@@ -193,13 +193,17 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
     async def _async_update_data(self) -> Status:
         """Fetch data from API endpoint and pre-process into lookup tables."""
         try:
-            resp = await super().get_status()
+            resp = await self._get_raw_status()
         except Exception as e:
             raise UpdateFailed(f"Error fetching data: {e}") from e
-        status = await self.build_status(resp.model_dump())
+        status = await self.build_status(resp)
         self._sweep_idle_buses(status)
         self._sweep_paused_buses(status)
         return status
+
+    async def _get_raw_status(self) -> dict:
+        """GET /api without pyamplipi's models, which drop fields it doesn't know about, such as each stream's disabled flag"""
+        return await self._client.get('')
 
     async def set_data(self, state: dict) -> Status:
         """Publish the Status returned by a command, so entities update without waiting for the next poll"""
@@ -243,6 +247,11 @@ class AmpliPiDataClient(DataUpdateCoordinator, AmpliPi):
                 for entity in state["groups"]
             ]
 
+            # Command responses come back through pyamplipi without the disabled flag, so keep the last one polled
+            was_disabled = {s.id: s.disabled for s in self.data.streams} if self.data is not None else {}
+            for entity in state["streams"]:
+                if entity.get("disabled") is None:
+                    entity["disabled"] = was_disabled.get(entity["id"], False)
             state["streams"] = [
                 await build_entity(entity, "stream", Stream, entity["name"])
                 for entity in state["streams"]

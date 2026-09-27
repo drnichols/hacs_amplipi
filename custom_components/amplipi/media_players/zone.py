@@ -91,7 +91,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
     async def async_turn_on(self):
         # Resume the stream that was playing when the zone/group was turned off, if it still exists
         last_stream = self._find_stream(self._last_stream_id)
-        if last_stream is not None and not getattr(last_stream, "disabled", False):
+        if last_stream is not None and not last_stream.disabled:
             _LOGGER.debug(f"Turning {self.name} on and resuming {last_stream.name}")
             try:
                 await self.async_connect_zones_to_stream(last_stream, *self._zone_args())
@@ -335,7 +335,7 @@ class AmpliPiZone(AmpliPiMediaPlayer, RestoreEntity):
         streams = self._streams or []
         return ['None'] + [
             self._stream_label(s) for s in streams
-            if not getattr(s, "disabled", False) and not routing.is_music_assistant_stream(s)
+            if not s.disabled and not routing.is_music_assistant_stream(s)
         ]
 
     @property
